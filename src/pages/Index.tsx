@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 
 interface Message {
@@ -127,6 +128,7 @@ function nowTime() {
 }
 
 export default function Index() {
+  const navigate = useNavigate();
   const [chats, setChats] = useState<Chat[]>(INITIAL_CHATS);
   const [activeId, setActiveId] = useState<number>(1);
   const [draft, setDraft] = useState('');
@@ -275,9 +277,18 @@ export default function Index() {
             </button>
           ))}
         </div>
-        <button className="w-10 h-10 rounded-md flex items-center justify-center hover:bg-primary-foreground/10 transition-colors">
-          <Icon name="Settings" size={20} />
-        </button>
+        <div className="flex flex-col items-center gap-2">
+          <button className="w-10 h-10 rounded-md flex items-center justify-center hover:bg-primary-foreground/10 transition-colors">
+            <Icon name="Settings" size={20} />
+          </button>
+          <button
+            onClick={() => navigate('/login')}
+            title="Выйти"
+            className="w-10 h-10 rounded-md flex items-center justify-center hover:bg-primary-foreground/10 transition-colors opacity-70 hover:opacity-100"
+          >
+            <Icon name="LogOut" size={18} />
+          </button>
+        </div>
       </nav>
 
       {/* Список чатов */}
