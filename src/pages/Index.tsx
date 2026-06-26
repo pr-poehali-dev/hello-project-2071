@@ -99,12 +99,38 @@ const CHATS: Chat[] = [
 ];
 
 const Index = () => {
+  const [chats, setChats] = useState<Chat[]>(CHATS);
   const [activeId, setActiveId] = useState(1);
   const [draft, setDraft] = useState('');
   const [query, setQuery] = useState('');
-  const active = CHATS.find((c) => c.id === activeId)!;
+  const active = chats.find((c) => c.id === activeId)!;
 
-  const filtered = CHATS.filter(
+  const sendMessage = () => {
+    const text = draft.trim();
+    if (!text) return;
+    const time = new Date().toLocaleTimeString('ru-RU', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === activeId
+          ? {
+              ...c,
+              last: `Вы: ${text}`,
+              time,
+              messages: [
+                ...c.messages,
+                { id: Date.now(), text, time, mine: true },
+              ],
+            }
+          : c
+      )
+    );
+    setDraft('');
+  };
+
+  const filtered = chats.filter(
     (c) =>
       c.name.toLowerCase().includes(query.toLowerCase()) ||
       c.role.toLowerCase().includes(query.toLowerCase())
@@ -297,10 +323,14 @@ const Index = () => {
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
               placeholder="Введите сообщение…"
               className="flex-1 h-10 px-4 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground"
             />
-            <button className="w-10 h-10 rounded-md bg-primary text-primary-foreground flex items-center justify-center hover:opacity-90 transition-opacity shrink-0">
+            <button
+              onClick={sendMessage}
+              className="w-10 h-10 rounded-md bg-primary text-primary-foreground flex items-center justify-center hover:opacity-90 transition-opacity shrink-0"
+            >
               <Icon name="Send" size={18} />
             </button>
           </div>
