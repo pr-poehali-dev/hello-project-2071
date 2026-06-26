@@ -323,7 +323,7 @@ const INCOMING: { chatId: number; sender: string; text: string; delay: number }[
 
 export default function Index() {
   const navigate = useNavigate();
-  const { permission, requestPermission, notify } = useNotifications();
+  const { permission, requestPermission, notify, soundEnabled, setSoundEnabled } = useNotifications();
   const [chats, setChats] = useState<Chat[]>(INITIAL_CHATS);
   const [activeId, setActiveId] = useState<number>(1);
   const [draft, setDraft] = useState('');
@@ -485,6 +485,7 @@ export default function Index() {
             { icon: 'Archive',       active: tab === 'archive', onClick: () => setTab('archive') },
             { icon: 'Users',         active: false,             onClick: () => {} },
             { icon: 'Bell',          active: false,             onClick: () => {} },
+            { icon: soundEnabled ? 'Volume2' : 'VolumeX', active: false, onClick: () => setSoundEnabled((v) => !v) },
           ].map((item, i) => (
             <button key={i} onClick={item.onClick}
               className={`w-10 h-10 rounded-md flex items-center justify-center transition-colors ${item.active ? 'bg-primary-foreground/20' : 'hover:bg-primary-foreground/10'}`}>
