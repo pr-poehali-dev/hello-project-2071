@@ -1,0 +1,23 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Send code - invalid phone",
+      "method": "POST",
+      "path": "/send-code",
+      "body": "{\"phone\": \"123\"}",
+      "expectedStatus": 400
+    },
+    {
+      "name": "GET / no token",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 404
+    }
+  ]
+}

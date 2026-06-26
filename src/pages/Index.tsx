@@ -1,8 +1,10 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import { useNotifications, SOUNDS, type SoundId } from '@/hooks/use-notifications';
 import CallScreen from '@/components/CallScreen';
+import { useMessenger } from '@/hooks/use-messenger';
+import { auth } from '@/lib/api';
 
 // ─── настройки внешнего вида ────────────────────────────────────────────────
 
@@ -381,13 +383,32 @@ export default function Index() {
 
   const updateSettings = (patch: Partial<AppSettings>) =>
     setSettings((prev) => { const next = { ...prev, ...patch }; applySettings(next); return next; });
-  const [chats, setChats] = useState<Chat[]>(INITIAL_CHATS);
-  const [activeId, setActiveId] = useState<number>(1);
+
+  // Редирект на логин если нет токена
+  useEffect(() => {
+    if (!auth.isLoggedIn()) navigate('/login');
+  }, [navigate]);
+
+  // ── API ──────────────────────────────────────────────────────────────────
+  const {
+    myUser, allUsers, chatList, setChatList,
+    loading: apiLoading,
+    loadMessages, sendMessage: apiSendMessage,
+    archiveChat: apiArchive, unarchiveChat: apiUnarchive, deleteChat: apiDeleteChat,
+    createChat, addMember: apiAddMember, removeMember: apiRemoveMember,
+    updateProfile,
+  } = useMessenger();
+
+  // Используем реальные чаты если загружены, иначе демо
+  const apiReady = !apiLoading && chatList.length > 0;
+  const chats = apiReady ? chatList : INITIAL_CHATS;
+  const setChats = setChatList as React.Dispatch<React.SetStateAction<typeof chatList>>;
+
+  const [activeId, setActiveId] = useState<number>(0);
   const [draft, setDraft] = useState('');
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<'chats' | 'archive'>('chats');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; chatId: number } | null>(null);
-  const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
   const [showProfile, setShowProfile] = useState(false);
   const [showCircle, setShowCircle] = useState(false);
   const [lightbox, setLightbox] = useState<MediaAttachment | null>(null);
@@ -409,6 +430,30 @@ export default function Index() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Профиль из API или fallback
+  const profile: UserProfile = myUser
+    ? { name: myUser.name, role: myUser.role, initials: myUser.initials, avatarUrl: myUser.avatar_url, status: myUser.status }
+    : DEFAULT_PROFILE;
+
+  // Установить первый чат активным при загрузке
+  useEffect(() => {
+    if (activeId === 0 && chats.length > 0) {
+      setActiveId(chats[0].id);
+    }
+  }, [chats, activeId]);
+
+  // Загрузить сообщения при смене активного чата
+  useEffect(() => {
+    if (activeId && apiReady) {
+      const chat = chatList.find((c) => c.id === activeId);
+      if (chat && chat.messages.length === 0 && !chat.loadingMessages) {
+        loadMessages(activeId);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, apiReady]);
+
   const activeChat = chats.find((c) => c.id === activeId) ?? null;
 
   useEffect(() => {
@@ -424,47 +469,62 @@ export default function Index() {
     }
   }, [permission]);
 
-  // Симуляция входящих сообщений
+  // Симуляция входящих сообщений (только в демо-режиме без API)
   useEffect(() => {
+    if (apiReady) return; // В продакшне используем реальный polling
+    const initials = (name: string) => name.split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase();
     const timers = INCOMING.map(({ chatId, sender, text, delay }) =>
       setTimeout(() => {
         const t = nowTime();
-        setChats((prev) =>
+        setChats((prev: typeof chatList) =>
           prev.map((c) =>
             c.id === chatId
-              ? { ...c, last: `${sender.split(' ')[0]}: ${text}`, time: t, unread: c.id === activeId ? 0 : c.unread + 1, messages: [...c.messages, { id: Date.now() + chatId, text, time: t, mine: false }] }
+              ? {
+                  ...c,
+                  last: `${sender.split(' ')[0]}: ${text}`,
+                  time: t,
+                  unread: c.id === activeId ? 0 : (c.unread ?? 0) + 1,
+                  messages: [...c.messages, {
+                    id: Date.now() + chatId, text, time: t, mine: false,
+                    removed: false, edited: false, reads: 0,
+                    senderName: sender, senderInitials: initials(sender), senderAvatar: null,
+                  }],
+                }
               : c
           )
         );
-        // Уведомление только если этот чат не активен
         setActiveId((cur) => {
-          if (cur !== chatId) {
-            notify(sender, text, `chat-${chatId}`);
-          }
+          if (cur !== chatId) notify(sender, text, `chat-${chatId}`);
           return cur;
         });
       }, delay)
     );
     return () => timers.forEach(clearTimeout);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notify]);
+  }, [notify, apiReady]);
 
   // ── отправка сообщений ───────────────────────────────────────────────────
-
-  const pushMessage = useCallback((msg: Omit<Message, 'id'>) => {
-    setChats((prev) =>
-      prev.map((c) =>
-        c.id === activeId
-          ? { ...c, last: msg.media ? (msg.media.type === 'circle' ? '🎥 Видео-кружок' : msg.media.type === 'video' ? '📹 Видео' : '📷 Фото') : `Вы: ${msg.text}`, time: msg.time, messages: [...c.messages, { ...msg, id: Date.now() }] }
-          : c
-      )
-    );
-  }, [activeId]);
 
   const sendMessage = () => {
     const text = draft.trim();
     if (!text || !activeChat) return;
-    pushMessage({ text, time: nowTime(), mine: true });
+    if (apiReady) {
+      apiSendMessage(activeId, text);
+    } else {
+      const t = nowTime();
+      const myName = myUser?.name ?? DEFAULT_PROFILE.name;
+      const myInitials = myUser?.initials ?? DEFAULT_PROFILE.initials;
+      const myAvatar = myUser?.avatar_url ?? null;
+      setChats((prev: typeof chatList) =>
+        prev.map((c) => c.id === activeId
+          ? { ...c, last: `Вы: ${text}`, time: t, messages: [...c.messages, {
+              id: Date.now(), text, time: t, mine: true,
+              removed: false, edited: false, reads: 1,
+              senderName: myName, senderInitials: myInitials, senderAvatar: myAvatar,
+            } as typeof c.messages[0]] }
+          : c)
+      );
+    }
     setDraft('');
   };
 
@@ -473,26 +533,35 @@ export default function Index() {
     files.forEach((file) => {
       const isVideo = file.type.startsWith('video/');
       const url = URL.createObjectURL(file);
-      pushMessage({ text: '', time: nowTime(), mine: true, media: { type: isVideo ? 'video' : 'image', url, name: `${file.name} (${formatBytes(file.size)})` } });
+      const media = { type: isVideo ? 'video' : 'image', url, name: `${file.name} (${formatBytes(file.size)})` } as const;
+      if (apiReady) {
+        apiSendMessage(activeId, '', media);
+      }
     });
     e.target.value = '';
   };
 
   const sendCircle = (url: string) => {
-    pushMessage({ text: '', time: nowTime(), mine: true, media: { type: 'circle', url } });
+    if (apiReady) apiSendMessage(activeId, '', { type: 'circle', url });
   };
 
   // ── архив / группы / участники ───────────────────────────────────────────
 
   const archiveChat = (id: number) => {
-    setChats((prev) => prev.map((c) => (c.id === id ? { ...c, archived: true } : c)));
+    if (apiReady) apiArchive(id);
+    else setChats((prev: typeof chatList) => prev.map((c) => c.id === id ? { ...c, archived: true } : c));
     if (activeId === id) { const next = chats.find((c) => c.id !== id && !c.archived); if (next) setActiveId(next.id); }
     setContextMenu(null);
   };
-  const unarchiveChat = (id: number) => { setChats((prev) => prev.map((c) => (c.id === id ? { ...c, archived: false } : c))); setContextMenu(null); };
+  const unarchiveChat = (id: number) => {
+    if (apiReady) apiUnarchive(id);
+    else setChats((prev: typeof chatList) => prev.map((c) => c.id === id ? { ...c, archived: false } : c));
+    setContextMenu(null);
+  };
 
   const deleteChat = (id: number) => {
-    setChats((prev) => prev.filter((c) => c.id !== id));
+    if (apiReady) apiDeleteChat(id);
+    else setChats((prev: typeof chatList) => prev.filter((c) => c.id !== id));
     if (activeId === id) {
       const next = chats.find((c) => c.id !== id);
       if (next) setActiveId(next.id);
@@ -506,33 +575,23 @@ export default function Index() {
     setContextMenu(null);
   };
 
-  const createGroup = () => {
+  const createGroup = async () => {
     const name = groupName.trim(); if (!name) return;
-    const t = nowTime();
-    const newChat: Chat = { id: Date.now(), name, role: `Группа${groupDesc ? ' · ' + groupDesc : ''}`, avatar: getInitials(name), last: 'Группа создана', time: t, unread: 0, online: false, group: true, memberIds: [...groupSelectedIds], messages: [{ id: 1, text: `Группа «${name}» создана.`, time: t, mine: true }] };
-    setChats((prev) => [newChat, ...prev]);
-    setActiveId(newChat.id); setTab('chats');
+    if (apiReady) {
+      const res = await createChat({ is_group: true, name, description: groupDesc, member_ids: groupSelectedIds });
+      if (res.ok && res.chat_id) { setActiveId(res.chat_id); setTab('chats'); }
+    }
     setGroupName(''); setGroupDesc(''); setGroupSelectedIds([]); setGroupContactSearch('');
     setShowCreateGroup(false);
   };
 
   const addMember = (contactId: number) => {
-    setChats((prev) => prev.map((c) => {
-      if (c.id !== activeId || !c.group || (c.memberIds ?? []).includes(contactId)) return c;
-      const contact = ALL_CONTACTS.find((ct) => ct.id === contactId)!;
-      const t = nowTime();
-      return { ...c, memberIds: [...(c.memberIds ?? []), contactId], messages: [...c.messages, { id: Date.now(), text: `${contact.name} добавлен(а) в группу.`, time: t, mine: false }] };
-    }));
+    if (apiReady) apiAddMember(activeId, contactId);
     setAddMemberSearch('');
   };
 
   const removeMember = (contactId: number) => {
-    setChats((prev) => prev.map((c) => {
-      if (c.id !== activeId || !c.group) return c;
-      const contact = ALL_CONTACTS.find((ct) => ct.id === contactId)!;
-      const t = nowTime();
-      return { ...c, memberIds: (c.memberIds ?? []).filter((id) => id !== contactId), messages: [...c.messages, { id: Date.now(), text: `${contact.name} удалён(а) из группы.`, time: t, mine: false }] };
-    }));
+    if (apiReady) apiRemoveMember(activeId, contactId);
   };
 
   // ── производные ─────────────────────────────────────────────────────────
@@ -541,10 +600,15 @@ export default function Index() {
     (tab === 'chats' ? !c.archived : c.archived) &&
     (c.name.toLowerCase().includes(query.toLowerCase()) || c.role.toLowerCase().includes(query.toLowerCase()))
   );
-  const activeMemberIds = activeChat?.memberIds ?? [];
-  const activeMembers = ALL_CONTACTS.filter((ct) => activeMemberIds.includes(ct.id));
-  const nonMembers = ALL_CONTACTS.filter((ct) => !activeMemberIds.includes(ct.id) && ct.name.toLowerCase().includes(addMemberSearch.toLowerCase()));
-  const filteredGroupContacts = ALL_CONTACTS.filter((ct) => ct.name.toLowerCase().includes(groupContactSearch.toLowerCase()));
+  // Контакты: реальные из API или демо-список
+  const contacts = apiReady && allUsers.length > 0 ? allUsers : ALL_CONTACTS;
+  const activeMembers = apiReady
+    ? (activeChat?.members ?? [])
+    : ALL_CONTACTS.filter((ct) => (activeChat?.memberIds ?? []).includes(ct.id));
+  const nonMembers = contacts.filter(
+    (ct) => !activeMembers.some((m) => m.id === ct.id) && ct.name.toLowerCase().includes(addMemberSearch.toLowerCase())
+  );
+  const filteredGroupContacts = contacts.filter((ct) => ct.name.toLowerCase().includes(groupContactSearch.toLowerCase()));
 
   // ── рендер ──────────────────────────────────────────────────────────────
 
@@ -573,7 +637,7 @@ export default function Index() {
             className={`w-10 h-10 rounded-md flex items-center justify-center transition-colors ${showSettings ? 'bg-primary-foreground/20' : 'hover:bg-primary-foreground/10'}`}>
             <Icon name="Settings" size={20} />
           </button>
-          <button onClick={() => navigate('/login')} title="Выйти"
+          <button onClick={() => { auth.clearToken(); navigate('/login'); }} title="Выйти"
             className="w-10 h-10 rounded-md flex items-center justify-center hover:bg-primary-foreground/10 transition-colors opacity-70 hover:opacity-100">
             <Icon name="LogOut" size={18} />
           </button>
@@ -935,7 +999,17 @@ export default function Index() {
       )}
 
       {/* Профиль */}
-      {showProfile && <ProfilePanel profile={profile} onUpdate={setProfile} onClose={() => setShowProfile(false)} />}
+      {showProfile && (
+        <ProfilePanel
+          profile={profile}
+          onUpdate={async (p) => {
+            if (apiReady) {
+              await updateProfile({ name: p.name, role: p.role, status: p.status, avatar_url: p.avatarUrl });
+            }
+          }}
+          onClose={() => setShowProfile(false)}
+        />
+      )}
 
       {/* Видео-кружок */}
       {showCircle && <VideoCircleRecorder onSend={sendCircle} onClose={() => setShowCircle(false)} />}

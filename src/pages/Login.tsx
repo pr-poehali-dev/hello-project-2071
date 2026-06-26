@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import Icon from '@/components/ui/icon';
+import { auth } from '@/lib/api';
 
 interface SavedAccount {
   id: string;
@@ -106,24 +107,21 @@ export default function Login() {
     setPhoneError('');
     const digits = phone.replace(/\D/g, '');
     if (digits.length < 11) { setPhoneError('Введите корректный номер телефона'); return; }
-    const code = String(Math.floor(1000 + Math.random() * 9000));
     setSmsSending(true);
     setSmsDemo(false);
     try {
-      const res = await fetch(SMS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, code }),
-      });
-      const data = await res.json();
-      if (data.demo) setSmsDemo(true);
+      const data = await auth.sendCode(phone);
+      if (data.demo) {
+        setSmsDemo(true);
+        if (data.code) setGeneratedCode(data.code);
+      } else {
+        setGeneratedCode('');
+      }
     } catch {
-      // fallback — показываем демо-код
       setSmsDemo(true);
     } finally {
       setSmsSending(false);
     }
-    setGeneratedCode(code);
     setCodeDigits(['', '', '', '']);
     setCodeError('');
     setResendTimer(RESEND_TIMEOUT);
@@ -148,22 +146,45 @@ export default function Login() {
     }
   };
 
-  const verifyCode = (digits = codeDigits) => {
+  const [verifying, setVerifying] = useState(false);
+  const [needName, setNeedName] = useState(false);
+  const [regNameInline, setRegNameInline] = useState('');
+  const [regRoleInline, setRegRoleInline] = useState('');
+
+  const verifyCode = async (digits = codeDigits) => {
     const entered = digits.join('');
     if (entered.length < 4) { setCodeError('Введите все 4 цифры'); return; }
-    if (entered !== generatedCode) { setCodeError('Неверный код. Попробуйте ещё раз'); setCodeDigits(['', '', '', '']); setTimeout(() => codeRefs[0].current?.focus(), 50); return; }
-
-    // Успех — добавляем аккаунт если нет
-    const fmt = formatPhone(phone);
-    const demo = DEMO_PHONES[fmt];
-    const name  = demo?.name    ?? `Пользователь`;
-    const role  = demo?.role    ?? 'Сотрудник';
-    const initials = demo?.initials ?? fmt.slice(-4);
-    setAccounts((prev) => {
-      if (prev.find((a) => a.phone === fmt)) return prev;
-      return [...prev, { id: Date.now().toString(), name, role, initials, avatarUrl: null, phone: fmt }];
-    });
-    navigate('/');
+    setVerifying(true);
+    setCodeError('');
+    try {
+      const res = await auth.verify(phone, entered, regNameInline || undefined, regRoleInline || undefined);
+      if (res.need_name) {
+        setNeedName(true);
+        setVerifying(false);
+        return;
+      }
+      if (!res.ok) {
+        setCodeError('Неверный или устаревший код');
+        setCodeDigits(['', '', '', '']);
+        setTimeout(() => codeRefs[0].current?.focus(), 50);
+        setVerifying(false);
+        return;
+      }
+      if (res.token) auth.setToken(res.token);
+      const u = res.user;
+      if (u) {
+        const fmt = formatPhone(phone);
+        setAccounts((prev) => {
+          if (prev.find((a) => a.phone === fmt)) return prev;
+          return [...prev, { id: String(u.id), name: u.name, role: u.role, initials: u.initials, avatarUrl: u.avatar_url, phone: fmt }];
+        });
+      }
+      navigate('/');
+    } catch {
+      setCodeError('Ошибка соединения. Попробуйте ещё раз');
+    } finally {
+      setVerifying(false);
+    }
   };
 
   const handleRegister = (e: React.FormEvent) => {
@@ -329,19 +350,32 @@ export default function Login() {
                 </p>
               )}
 
+              {/* Форма имени при первой регистрации */}
+              {needName && (
+                <div className="space-y-2 animate-fade-in border border-border rounded-lg p-4 bg-secondary/40">
+                  <p className="text-xs font-medium text-muted-foreground">Первый вход — представьтесь</p>
+                  <input autoFocus value={regNameInline} onChange={(e) => setRegNameInline(e.target.value)}
+                    placeholder="Имя и фамилия *"
+                    className="w-full h-10 px-3 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground" />
+                  <input value={regRoleInline} onChange={(e) => setRegRoleInline(e.target.value)}
+                    placeholder="Должность (необязательно)"
+                    className="w-full h-10 px-3 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground" />
+                </div>
+              )}
+
               {/* Подсказка для демо — только если SMS не настроен */}
-              {smsDemo && (
+              {smsDemo && generatedCode && (
                 <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3 flex items-start gap-2.5 animate-fade-in">
                   <Icon name="Info" size={15} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                   <p className="text-xs text-amber-700 dark:text-amber-400">
-                    Демо-режим (SMS-ключ не задан). Ваш код: <span className="font-mono font-bold text-amber-900 dark:text-amber-200">{generatedCode}</span>
+                    Демо-режим. Ваш код: <span className="font-mono font-bold text-amber-900 dark:text-amber-200">{generatedCode}</span>
                   </p>
                 </div>
               )}
 
-              <button onClick={() => verifyCode()}
-                className="w-full h-11 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:opacity-90 transition-opacity">
-                Подтвердить
+              <button onClick={() => verifyCode()} disabled={verifying || (needName && !regNameInline.trim())}
+                className="w-full h-11 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2">
+                {verifying ? <><Icon name="Loader" size={16} className="animate-spin" />Проверяем…</> : 'Подтвердить'}
               </button>
 
               {/* Повторная отправка */}

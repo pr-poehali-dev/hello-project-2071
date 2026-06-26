@@ -1,3 +1,7 @@
 {
+  "km-messages": "https://functions.poehali.dev/799a85d6-de39-46fa-b900-3cd65d25339c",
+  "km-users": "https://functions.poehali.dev/684c0c08-bf0a-4088-9d27-afd1b20e1b21",
+  "km-auth": "https://functions.poehali.dev/8399d4e8-b98c-40b5-ac70-3a3efd19a67b",
+  "km-chats": "https://functions.poehali.dev/e4fdcf79-f13d-41ea-be32-d7e991948593",
   "send-sms": "https://functions.poehali.dev/3353b357-5daf-4c33-a0da-54a127b3f6e5"
 }
