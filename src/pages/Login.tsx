@@ -22,6 +22,7 @@ const DEMO_PHONES: Record<string, { name: string; role: string; initials: string
 
 const QR_SESSION = `${typeof window !== 'undefined' ? window.location.origin : ''}?qr=1&s=${Math.random().toString(36).slice(2, 10)}`;
 const RESEND_TIMEOUT = 60;
+const SMS_URL = 'https://functions.poehali.dev/3353b357-5daf-4c33-a0da-54a127b3f6e5';
 
 function formatPhone(raw: string): string {
   const digits = raw.replace(/\D/g, '').slice(0, 11);
@@ -65,6 +66,8 @@ export default function Login() {
   const [codeDigits, setCodeDigits] = useState(['', '', '', '']);
   const [codeError, setCodeError] = useState('');
   const [resendTimer, setResendTimer] = useState(0);
+  const [smsSending, setSmsSending] = useState(false);
+  const [smsDemo, setSmsDemo] = useState(false);
   const codeRefs = [useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null)];
 
   // Регистрация
@@ -99,18 +102,32 @@ export default function Login() {
     return () => { clearInterval(iv); clearTimeout(t); };
   }, [mode, navigate]);
 
-  const sendCode = () => {
+  const sendCode = async () => {
     setPhoneError('');
     const digits = phone.replace(/\D/g, '');
     if (digits.length < 11) { setPhoneError('Введите корректный номер телефона'); return; }
     const code = String(Math.floor(1000 + Math.random() * 9000));
+    setSmsSending(true);
+    setSmsDemo(false);
+    try {
+      const res = await fetch(SMS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, code }),
+      });
+      const data = await res.json();
+      if (data.demo) setSmsDemo(true);
+    } catch {
+      // fallback — показываем демо-код
+      setSmsDemo(true);
+    } finally {
+      setSmsSending(false);
+    }
     setGeneratedCode(code);
     setCodeDigits(['', '', '', '']);
     setCodeError('');
     setResendTimer(RESEND_TIMEOUT);
     setMode('code');
-    // В демо показываем код в консоли
-    console.info(`📱 Код подтверждения: ${code}`);
     setTimeout(() => codeRefs[0].current?.focus(), 100);
   };
 
@@ -248,9 +265,9 @@ export default function Login() {
                   </p>
                 )}
               </div>
-              <button onClick={sendCode}
-                className="w-full h-11 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:opacity-90 transition-opacity">
-                Получить код
+              <button onClick={sendCode} disabled={smsSending}
+                className="w-full h-11 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2">
+                {smsSending ? <><Icon name="Loader" size={16} className="animate-spin" />Отправляем…</> : 'Получить код'}
               </button>
               <p className="text-center text-xs text-muted-foreground">
                 Демо: <span className="font-mono text-foreground">+7 900 000 0001</span>
@@ -312,13 +329,15 @@ export default function Login() {
                 </p>
               )}
 
-              {/* Подсказка для демо */}
-              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3 flex items-start gap-2.5">
-                <Icon name="Info" size={15} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                <p className="text-xs text-amber-700 dark:text-amber-400">
-                  Демо-режим: код отображается в консоли браузера (F12). Настоящий код: <span className="font-mono font-bold">{generatedCode}</span>
-                </p>
-              </div>
+              {/* Подсказка для демо — только если SMS не настроен */}
+              {smsDemo && (
+                <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3 flex items-start gap-2.5 animate-fade-in">
+                  <Icon name="Info" size={15} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    Демо-режим (SMS-ключ не задан). Ваш код: <span className="font-mono font-bold text-amber-900 dark:text-amber-200">{generatedCode}</span>
+                  </p>
+                </div>
+              )}
 
               <button onClick={() => verifyCode()}
                 className="w-full h-11 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:opacity-90 transition-opacity">

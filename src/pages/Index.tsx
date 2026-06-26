@@ -393,6 +393,8 @@ export default function Index() {
   const [lightbox, setLightbox] = useState<MediaAttachment | null>(null);
   const [showNotifBanner, setShowNotifBanner] = useState(false);
   const [activeCall, setActiveCall] = useState<{ type: 'audio' | 'video' } | null>(null);
+  const [blockedIds, setBlockedIds] = useState<number[]>([]);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
 
   // группа
   const [showCreateGroup, setShowCreateGroup] = useState(false);
@@ -488,6 +490,21 @@ export default function Index() {
     setContextMenu(null);
   };
   const unarchiveChat = (id: number) => { setChats((prev) => prev.map((c) => (c.id === id ? { ...c, archived: false } : c))); setContextMenu(null); };
+
+  const deleteChat = (id: number) => {
+    setChats((prev) => prev.filter((c) => c.id !== id));
+    if (activeId === id) {
+      const next = chats.find((c) => c.id !== id);
+      if (next) setActiveId(next.id);
+    }
+    setConfirmDelete(null);
+    setContextMenu(null);
+  };
+
+  const toggleBlock = (id: number) => {
+    setBlockedIds((prev) => prev.includes(id) ? prev.filter((b) => b !== id) : [...prev, id]);
+    setContextMenu(null);
+  };
 
   const createGroup = () => {
     const name = groupName.trim(); if (!name) return;
@@ -659,8 +676,9 @@ export default function Index() {
                     {activeChat.name}
                     {activeChat.archived && <span className="ml-1 text-[10px] font-normal bg-muted text-muted-foreground px-1.5 py-0.5 rounded">Архив</span>}
                   </p>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {activeChat.group ? `${activeMembers.length} участник${activeMembers.length === 1 ? '' : activeMembers.length < 5 ? 'а' : 'ов'}` : activeChat.online ? 'В сети' : activeChat.role}
+                  <p className="text-xs text-muted-foreground truncate flex items-center gap-1">
+                    {blockedIds.includes(activeChat.id) && <><Icon name="ShieldX" size={11} className="text-amber-500 shrink-0" /><span className="text-amber-500">Заблокирован</span></>}
+                    {!blockedIds.includes(activeChat.id) && (activeChat.group ? `${activeMembers.length} участник${activeMembers.length === 1 ? '' : activeMembers.length < 5 ? 'а' : 'ов'}` : activeChat.online ? 'В сети' : activeChat.role)}
                   </p>
                 </div>
               </div>
@@ -730,6 +748,13 @@ export default function Index() {
 
                 {/* Ввод */}
                 <footer className="px-6 py-4 border-t border-border bg-card shrink-0">
+                  {blockedIds.includes(activeChat.id) ? (
+                    <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
+                      <Icon name="ShieldX" size={16} className="text-amber-500" />
+                      <span>Вы заблокировали этого пользователя.</span>
+                      <button onClick={() => toggleBlock(activeChat.id)} className="text-primary hover:underline underline-offset-2 text-sm">Разблокировать</button>
+                    </div>
+                  ) : (
                   <div className="flex items-end gap-2">
                     {/* Прикрепить файл */}
                     <button onClick={() => fileInputRef.current?.click()}
@@ -753,6 +778,7 @@ export default function Index() {
                       <Icon name="Send" size={18} />
                     </button>
                   </div>
+                  )}
                 </footer>
               </div>
 
@@ -811,18 +837,34 @@ export default function Index() {
       {contextMenu && (
         <div className="fixed z-50 bg-card border border-border rounded-lg shadow-lg py-1 min-w-[180px] animate-fade-in"
           style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(e) => e.stopPropagation()}>
-          {chats.find((c) => c.id === contextMenu.chatId)?.archived ? (
-            <button onClick={() => unarchiveChat(contextMenu.chatId)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-secondary transition-colors">
-              <Icon name="ArchiveRestore" size={16} className="text-muted-foreground" />Вернуть из архива
-            </button>
-          ) : (
-            <button onClick={() => archiveChat(contextMenu.chatId)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-secondary transition-colors">
-              <Icon name="Archive" size={16} className="text-muted-foreground" />Отправить в архив
-            </button>
-          )}
-          <button onClick={() => setContextMenu(null)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-secondary transition-colors">
-            <Icon name="BellOff" size={16} className="text-muted-foreground" />Отключить уведомления
-          </button>
+          {(() => {
+            const chat = chats.find((c) => c.id === contextMenu.chatId);
+            const isBlocked = blockedIds.includes(contextMenu.chatId);
+            return (
+              <>
+                {chat?.archived ? (
+                  <button onClick={() => unarchiveChat(contextMenu.chatId)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-secondary transition-colors">
+                    <Icon name="ArchiveRestore" size={16} className="text-muted-foreground" />Вернуть из архива
+                  </button>
+                ) : (
+                  <button onClick={() => archiveChat(contextMenu.chatId)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-secondary transition-colors">
+                    <Icon name="Archive" size={16} className="text-muted-foreground" />Отправить в архив
+                  </button>
+                )}
+                {!chat?.group && (
+                  <button onClick={() => toggleBlock(contextMenu.chatId)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-secondary transition-colors">
+                    <Icon name={isBlocked ? 'ShieldOff' : 'ShieldX'} size={16} className={isBlocked ? 'text-muted-foreground' : 'text-amber-500'} />
+                    {isBlocked ? 'Разблокировать' : 'Заблокировать'}
+                  </button>
+                )}
+                <div className="border-t border-border/60 my-1" />
+                <button onClick={() => { setConfirmDelete(contextMenu.chatId); setContextMenu(null); }}
+                  className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-destructive hover:bg-destructive/10 transition-colors">
+                  <Icon name="Trash2" size={16} />Удалить чат
+                </button>
+              </>
+            );
+          })()}
         </div>
       )}
 
@@ -1110,6 +1152,30 @@ export default function Index() {
                 className="w-full h-10 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity"
               >
                 Готово
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Диалог подтверждения удаления */}
+      {confirmDelete !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-sm mx-4 animate-fade-in">
+            <div className="px-6 py-5 border-b border-border">
+              <h2 className="font-semibold text-base">Удалить чат?</h2>
+              <p className="text-sm text-muted-foreground mt-1.5">
+                Вся история переписки будет удалена безвозвратно. Это действие нельзя отменить.
+              </p>
+            </div>
+            <div className="px-6 py-4 flex gap-3 justify-end">
+              <button onClick={() => setConfirmDelete(null)}
+                className="h-9 px-4 rounded-md text-sm text-muted-foreground hover:bg-secondary transition-colors">
+                Отмена
+              </button>
+              <button onClick={() => deleteChat(confirmDelete)}
+                className="h-9 px-5 rounded-md text-sm bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity font-medium flex items-center gap-2">
+                <Icon name="Trash2" size={15} />Удалить
               </button>
             </div>
           </div>
