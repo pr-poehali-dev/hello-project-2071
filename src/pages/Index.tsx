@@ -1,19 +1,28 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
+
+// ─── типы ────────────────────────────────────────────────────────────────────
+
+interface MediaAttachment {
+  type: 'image' | 'video' | 'circle';
+  url: string;
+  name?: string;
+}
 
 interface Message {
   id: number;
   text: string;
   time: string;
   mine: boolean;
+  media?: MediaAttachment;
 }
 
 interface Contact {
   id: number;
   name: string;
   role: string;
-  avatar: string;
+  avatar: string;   // инициалы или data-url фото
   online: boolean;
 }
 
@@ -32,100 +41,277 @@ interface Chat {
   messages: Message[];
 }
 
+interface UserProfile {
+  name: string;
+  role: string;
+  initials: string;
+  avatarUrl: string | null;
+  status: string;
+}
+
+// ─── данные ──────────────────────────────────────────────────────────────────
+
 const ALL_CONTACTS: Contact[] = [
-  { id: 1, name: 'Елена Воронцова',   role: 'Финансовый директор',         avatar: 'ЕВ', online: true  },
-  { id: 2, name: 'Дмитрий Соколов',   role: 'Руководитель отдела продаж',  avatar: 'ДС', online: false },
-  { id: 3, name: 'Анна Кузнецова',    role: 'HR-директор',                 avatar: 'АК', online: false },
-  { id: 4, name: 'Алексей Громов',    role: 'Технический директор',        avatar: 'АГ', online: true  },
-  { id: 5, name: 'Мария Лебедева',    role: 'Руководитель маркетинга',     avatar: 'МЛ', online: true  },
-  { id: 6, name: 'Сергей Тихонов',    role: 'Юрист',                       avatar: 'СТ', online: false },
-  { id: 7, name: 'Ольга Семёнова',    role: 'Бухгалтер',                   avatar: 'ОС', online: false },
-  { id: 8, name: 'Павел Морозов',     role: 'Менеджер проекта',            avatar: 'ПМ', online: true  },
+  { id: 1, name: 'Елена Воронцова',  role: 'Финансовый директор',        avatar: 'ЕВ', online: true  },
+  { id: 2, name: 'Дмитрий Соколов',  role: 'Руководитель отдела продаж', avatar: 'ДС', online: false },
+  { id: 3, name: 'Анна Кузнецова',   role: 'HR-директор',                avatar: 'АК', online: false },
+  { id: 4, name: 'Алексей Громов',   role: 'Технический директор',       avatar: 'АГ', online: true  },
+  { id: 5, name: 'Мария Лебедева',   role: 'Руководитель маркетинга',    avatar: 'МЛ', online: true  },
+  { id: 6, name: 'Сергей Тихонов',   role: 'Юрист',                      avatar: 'СТ', online: false },
+  { id: 7, name: 'Ольга Семёнова',   role: 'Бухгалтер',                  avatar: 'ОС', online: false },
+  { id: 8, name: 'Павел Морозов',    role: 'Менеджер проекта',           avatar: 'ПМ', online: true  },
 ];
 
 const INITIAL_CHATS: Chat[] = [
   {
-    id: 1,
-    name: 'Совет директоров',
-    role: 'Группа',
-    avatar: 'СД',
-    last: 'Алексей: Документы согласованы, отправляю...',
-    time: '14:32',
-    unread: 3,
-    online: true,
-    group: true,
-    memberIds: [1, 4, 5],
+    id: 1, name: 'Совет директоров', role: 'Группа', avatar: 'СД',
+    last: 'Алексей: Документы согласованы…', time: '14:32', unread: 3, online: true,
+    group: true, memberIds: [1, 4, 5],
     messages: [
       { id: 1, text: 'Коллеги, добрый день. Прошу ознакомиться с обновлённым планом на Q3.', time: '14:20', mine: false },
-      { id: 2, text: 'Принято. Просмотрю до конца дня и дам обратную связь.', time: '14:25', mine: true },
-      { id: 3, text: 'Документы согласованы, отправляю финальную версию в почту.', time: '14:32', mine: false },
+      { id: 2, text: 'Принято. Просмотрю до конца дня.', time: '14:25', mine: true },
+      { id: 3, text: 'Документы согласованы, отправляю финальную версию.', time: '14:32', mine: false },
     ],
   },
   {
-    id: 2,
-    name: 'Елена Воронцова',
-    role: 'Финансовый директор',
-    avatar: 'ЕВ',
-    last: 'Отчёт по бюджету готов к защите',
-    time: '13:10',
-    unread: 0,
-    online: true,
+    id: 2, name: 'Елена Воронцова', role: 'Финансовый директор', avatar: 'ЕВ',
+    last: 'Отчёт по бюджету готов', time: '13:10', unread: 0, online: true,
     messages: [
       { id: 1, text: 'Иван, отчёт по бюджету готов к защите.', time: '13:08', mine: false },
-      { id: 2, text: 'Отлично, спасибо. Назначим встречу на завтра.', time: '13:10', mine: true },
+      { id: 2, text: 'Отлично, назначим встречу на завтра.', time: '13:10', mine: true },
     ],
   },
   {
-    id: 3,
-    name: 'Дмитрий Соколов',
-    role: 'Руководитель отдела продаж',
-    avatar: 'ДС',
-    last: 'Вы: Согласен, давайте обсудим на созвоне',
-    time: 'Вчера',
-    unread: 0,
-    online: false,
+    id: 3, name: 'Дмитрий Соколов', role: 'Руководитель отдела продаж', avatar: 'ДС',
+    last: 'Вы: Согласен, обсудим на созвоне', time: 'Вчера', unread: 0, online: false,
     messages: [
       { id: 1, text: 'Предлагаю пересмотреть условия по ключевому клиенту.', time: '11:40', mine: false },
-      { id: 2, text: 'Согласен, давайте обсудим на созвоне.', time: '11:45', mine: true },
+      { id: 2, text: 'Согласен, обсудим на созвоне.', time: '11:45', mine: true },
     ],
   },
   {
-    id: 4,
-    name: 'Отдел маркетинга',
-    role: 'Группа',
-    avatar: 'ОМ',
-    last: 'Мария: Кампания запущена по графику',
-    time: 'Вчера',
-    unread: 0,
-    online: false,
-    group: true,
-    memberIds: [5, 2, 7],
+    id: 4, name: 'Отдел маркетинга', role: 'Группа', avatar: 'ОМ',
+    last: 'Мария: Кампания запущена', time: 'Вчера', unread: 0, online: false,
+    group: true, memberIds: [5, 2, 7],
     messages: [
       { id: 1, text: 'Кампания запущена по графику. Первые метрики завтра.', time: '18:00', mine: false },
     ],
   },
   {
-    id: 5,
-    name: 'Анна Кузнецова',
-    role: 'HR-директор',
-    avatar: 'АК',
-    last: 'Кандидат подтвердил выход с понедельника',
-    time: 'Пн',
-    unread: 0,
-    online: false,
+    id: 5, name: 'Анна Кузнецова', role: 'HR-директор', avatar: 'АК',
+    last: 'Кандидат выходит с понедельника', time: 'Пн', unread: 0, online: false,
     messages: [
       { id: 1, text: 'Кандидат подтвердил выход с понедельника.', time: '09:15', mine: false },
     ],
   },
 ];
 
+const DEFAULT_PROFILE: UserProfile = {
+  name: 'Иван Петров',
+  role: 'Генеральный директор',
+  initials: 'ИП',
+  avatarUrl: null,
+  status: 'В сети',
+};
+
+// ─── вспомогательные ────────────────────────────────────────────────────────
+
 function getInitials(name: string) {
   return name.split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 }
-
 function nowTime() {
   return new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
+function formatBytes(b: number) {
+  return b < 1024 * 1024 ? `${(b / 1024).toFixed(0)} КБ` : `${(b / 1024 / 1024).toFixed(1)} МБ`;
+}
+
+// ─── Avatar ──────────────────────────────────────────────────────────────────
+
+function Avatar({ url, initials, size = 10, className = '' }: { url: string | null; initials: string; size?: number; className?: string }) {
+  const sz = `w-${size} h-${size}`;
+  if (url) return <img src={url} alt={initials} className={`${sz} rounded-md object-cover shrink-0 ${className}`} />;
+  return <div className={`${sz} rounded-md bg-primary text-primary-foreground flex items-center justify-center text-sm font-semibold shrink-0 ${className}`}>{initials}</div>;
+}
+
+// ─── ProfilePanel ────────────────────────────────────────────────────────────
+
+function ProfilePanel({ profile, onUpdate, onClose }: {
+  profile: UserProfile;
+  onUpdate: (p: UserProfile) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(profile.name);
+  const [role, setRole] = useState(profile.role);
+  const [status, setStatus] = useState(profile.status);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(profile.avatarUrl);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatar = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setAvatarUrl(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const save = () => {
+    onUpdate({ name: name.trim() || profile.name, role: role.trim() || profile.role, initials: getInitials(name.trim() || profile.name), avatarUrl, status });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4 animate-fade-in">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-border">
+          <h2 className="font-semibold text-base">Мой профиль</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors">
+            <Icon name="X" size={18} />
+          </button>
+        </div>
+        <div className="px-6 py-6 space-y-5">
+          {/* Аватар */}
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              {avatarUrl
+                ? <img src={avatarUrl} alt="avatar" className="w-20 h-20 rounded-xl object-cover" />
+                : <div className="w-20 h-20 rounded-xl bg-primary text-primary-foreground flex items-center justify-center text-2xl font-bold">{getInitials(name || profile.name)}</div>
+              }
+              <button onClick={() => fileRef.current?.click()}
+                className="absolute -bottom-2 -right-2 w-7 h-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-md hover:opacity-90 transition-opacity">
+                <Icon name="Camera" size={14} />
+              </button>
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleAvatar} />
+            </div>
+            <div>
+              <p className="font-medium text-sm">{name || profile.name}</p>
+              <p className="text-xs text-muted-foreground">{role || profile.role}</p>
+              <button onClick={() => fileRef.current?.click()} className="text-xs text-primary mt-1 hover:underline">
+                Изменить фото
+              </button>
+            </div>
+          </div>
+
+          {/* Поля */}
+          {[
+            { label: 'Имя и фамилия', value: name, set: setName, placeholder: 'Иван Петров' },
+            { label: 'Должность', value: role, set: setRole, placeholder: 'Генеральный директор' },
+            { label: 'Статус', value: status, set: setStatus, placeholder: 'В сети' },
+          ].map((f) => (
+            <div key={f.label}>
+              <label className="text-sm font-medium block mb-1.5">{f.label}</label>
+              <input value={f.value} onChange={(e) => f.set(e.target.value)} placeholder={f.placeholder}
+                className="w-full h-10 px-4 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground" />
+            </div>
+          ))}
+        </div>
+        <div className="px-6 py-4 border-t border-border flex justify-end gap-2">
+          <button onClick={onClose} className="h-9 px-4 rounded-md text-sm text-muted-foreground hover:bg-secondary transition-colors">Отмена</button>
+          <button onClick={save} className="h-9 px-5 rounded-md text-sm bg-primary text-primary-foreground hover:opacity-90 transition-opacity font-medium">Сохранить</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── VideoCircle ─────────────────────────────────────────────────────────────
+
+function VideoCircleRecorder({ onSend, onClose }: { onSend: (url: string) => void; onClose: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const mediaRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true })
+      .then((stream) => {
+        streamRef.current = stream;
+        if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); }
+      })
+      .catch(() => setError('Нет доступа к камере'));
+    return () => { streamRef.current?.getTracks().forEach((t) => t.stop()); if (timerRef.current) clearInterval(timerRef.current); };
+  }, []);
+
+  const startRec = () => {
+    if (!streamRef.current) return;
+    chunksRef.current = [];
+    const mr = new MediaRecorder(streamRef.current);
+    mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+    mr.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+      setPreview(URL.createObjectURL(blob));
+    };
+    mr.start();
+    mediaRef.current = mr;
+    setRecording(true);
+    setSeconds(0);
+    timerRef.current = setInterval(() => setSeconds((s) => { if (s >= 59) { stopRec(); return s; } return s + 1; }), 1000);
+  };
+
+  const stopRec = () => {
+    mediaRef.current?.stop();
+    setRecording(false);
+    if (timerRef.current) clearInterval(timerRef.current);
+  };
+
+  const send = () => {
+    if (preview) { onSend(preview); onClose(); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <div className="bg-card border border-border rounded-2xl shadow-xl w-80 mx-4 animate-fade-in overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <h2 className="font-semibold text-sm">Видео-кружок</h2>
+          <button onClick={onClose} className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary"><Icon name="X" size={16} /></button>
+        </div>
+        <div className="p-5 flex flex-col items-center gap-4">
+          {error ? (
+            <div className="text-center text-sm text-muted-foreground py-8 space-y-2">
+              <Icon name="CameraOff" size={36} className="mx-auto opacity-30" />
+              <p>{error}</p>
+            </div>
+          ) : preview ? (
+            <>
+              <video src={preview} controls className="w-52 h-52 rounded-full object-cover border-4 border-primary" />
+              <div className="flex gap-2 w-full">
+                <button onClick={() => setPreview(null)} className="flex-1 h-10 rounded-md bg-secondary text-sm font-medium hover:bg-secondary/80 transition-colors">Переснять</button>
+                <button onClick={send} className="flex-1 h-10 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5">
+                  <Icon name="Send" size={15} /> Отправить
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="relative">
+                <video ref={videoRef} muted playsInline className="w-52 h-52 rounded-full object-cover border-4 border-border bg-black" />
+                {recording && (
+                  <div className="absolute top-2 right-2 bg-destructive text-white text-[11px] font-mono px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                    {String(Math.floor(seconds / 60)).padStart(2, '0')}:{String(seconds % 60).padStart(2, '0')}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={recording ? stopRec : startRec}
+                className={`w-14 h-14 rounded-full flex items-center justify-center transition-colors shadow-md ${recording ? 'bg-destructive text-white' : 'bg-primary text-primary-foreground'}`}>
+                <Icon name={recording ? 'Square' : 'Video'} size={22} />
+              </button>
+              <p className="text-xs text-muted-foreground">{recording ? 'Нажмите для остановки' : 'Нажмите для записи'}</p>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main ────────────────────────────────────────────────────────────────────
 
 export default function Index() {
   const navigate = useNavigate();
@@ -135,136 +321,122 @@ export default function Index() {
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<'chats' | 'archive'>('chats');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; chatId: number } | null>(null);
+  const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
+  const [showProfile, setShowProfile] = useState(false);
+  const [showCircle, setShowCircle] = useState(false);
+  const [lightbox, setLightbox] = useState<MediaAttachment | null>(null);
 
-  // создание группы
+  // группа
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [groupDesc, setGroupDesc] = useState('');
   const [groupSelectedIds, setGroupSelectedIds] = useState<number[]>([]);
   const [groupContactSearch, setGroupContactSearch] = useState('');
 
-  // панель участников группы
+  // участники
   const [showMembers, setShowMembers] = useState(false);
   const [addMemberSearch, setAddMemberSearch] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const activeChat = chats.find((c) => c.id === activeId) ?? null;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeId, activeChat?.messages.length]);
-
-  // закрываем панель при смене чата
   useEffect(() => { setShowMembers(false); }, [activeId]);
+
+  // ── отправка сообщений ───────────────────────────────────────────────────
+
+  const pushMessage = useCallback((msg: Omit<Message, 'id'>) => {
+    setChats((prev) =>
+      prev.map((c) =>
+        c.id === activeId
+          ? { ...c, last: msg.media ? (msg.media.type === 'circle' ? '🎥 Видео-кружок' : msg.media.type === 'video' ? '📹 Видео' : '📷 Фото') : `Вы: ${msg.text}`, time: msg.time, messages: [...c.messages, { ...msg, id: Date.now() }] }
+          : c
+      )
+    );
+  }, [activeId]);
 
   const sendMessage = () => {
     const text = draft.trim();
     if (!text || !activeChat) return;
-    const t = nowTime();
-    setChats((prev) =>
-      prev.map((c) =>
-        c.id === activeId
-          ? { ...c, last: `Вы: ${text}`, time: t, messages: [...c.messages, { id: Date.now(), text, time: t, mine: true }] }
-          : c
-      )
-    );
+    pushMessage({ text, time: nowTime(), mine: true });
     setDraft('');
   };
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    files.forEach((file) => {
+      const isVideo = file.type.startsWith('video/');
+      const url = URL.createObjectURL(file);
+      pushMessage({ text: '', time: nowTime(), mine: true, media: { type: isVideo ? 'video' : 'image', url, name: `${file.name} (${formatBytes(file.size)})` } });
+    });
+    e.target.value = '';
+  };
+
+  const sendCircle = (url: string) => {
+    pushMessage({ text: '', time: nowTime(), mine: true, media: { type: 'circle', url } });
+  };
+
+  // ── архив / группы / участники ───────────────────────────────────────────
+
   const archiveChat = (id: number) => {
     setChats((prev) => prev.map((c) => (c.id === id ? { ...c, archived: true } : c)));
-    if (activeId === id) {
-      const next = chats.find((c) => c.id !== id && !c.archived);
-      if (next) setActiveId(next.id);
-    }
+    if (activeId === id) { const next = chats.find((c) => c.id !== id && !c.archived); if (next) setActiveId(next.id); }
     setContextMenu(null);
   };
-
-  const unarchiveChat = (id: number) => {
-    setChats((prev) => prev.map((c) => (c.id === id ? { ...c, archived: false } : c)));
-    setContextMenu(null);
-  };
+  const unarchiveChat = (id: number) => { setChats((prev) => prev.map((c) => (c.id === id ? { ...c, archived: false } : c))); setContextMenu(null); };
 
   const createGroup = () => {
-    const name = groupName.trim();
-    if (!name) return;
+    const name = groupName.trim(); if (!name) return;
     const t = nowTime();
-    const newChat: Chat = {
-      id: Date.now(),
-      name,
-      role: `Группа${groupDesc ? ' · ' + groupDesc : ''}`,
-      avatar: getInitials(name),
-      last: 'Группа создана',
-      time: t,
-      unread: 0,
-      online: false,
-      group: true,
-      memberIds: [...groupSelectedIds],
-      messages: [{ id: 1, text: `Группа «${name}» создана.`, time: t, mine: true }],
-    };
+    const newChat: Chat = { id: Date.now(), name, role: `Группа${groupDesc ? ' · ' + groupDesc : ''}`, avatar: getInitials(name), last: 'Группа создана', time: t, unread: 0, online: false, group: true, memberIds: [...groupSelectedIds], messages: [{ id: 1, text: `Группа «${name}» создана.`, time: t, mine: true }] };
     setChats((prev) => [newChat, ...prev]);
-    setActiveId(newChat.id);
-    setTab('chats');
+    setActiveId(newChat.id); setTab('chats');
     setGroupName(''); setGroupDesc(''); setGroupSelectedIds([]); setGroupContactSearch('');
     setShowCreateGroup(false);
   };
 
   const addMember = (contactId: number) => {
-    setChats((prev) =>
-      prev.map((c) => {
-        if (c.id !== activeId || !c.group) return c;
-        if ((c.memberIds ?? []).includes(contactId)) return c;
-        const ids = [...(c.memberIds ?? []), contactId];
-        const contact = ALL_CONTACTS.find((ct) => ct.id === contactId)!;
-        const t = nowTime();
-        return {
-          ...c,
-          memberIds: ids,
-          messages: [...c.messages, { id: Date.now(), text: `${contact.name} добавлен(а) в группу.`, time: t, mine: false }],
-        };
-      })
-    );
+    setChats((prev) => prev.map((c) => {
+      if (c.id !== activeId || !c.group || (c.memberIds ?? []).includes(contactId)) return c;
+      const contact = ALL_CONTACTS.find((ct) => ct.id === contactId)!;
+      const t = nowTime();
+      return { ...c, memberIds: [...(c.memberIds ?? []), contactId], messages: [...c.messages, { id: Date.now(), text: `${contact.name} добавлен(а) в группу.`, time: t, mine: false }] };
+    }));
     setAddMemberSearch('');
   };
 
   const removeMember = (contactId: number) => {
-    setChats((prev) =>
-      prev.map((c) => {
-        if (c.id !== activeId || !c.group) return c;
-        const ids = (c.memberIds ?? []).filter((id) => id !== contactId);
-        const contact = ALL_CONTACTS.find((ct) => ct.id === contactId)!;
-        const t = nowTime();
-        return {
-          ...c,
-          memberIds: ids,
-          messages: [...c.messages, { id: Date.now(), text: `${contact.name} удалён(а) из группы.`, time: t, mine: false }],
-        };
-      })
-    );
+    setChats((prev) => prev.map((c) => {
+      if (c.id !== activeId || !c.group) return c;
+      const contact = ALL_CONTACTS.find((ct) => ct.id === contactId)!;
+      const t = nowTime();
+      return { ...c, memberIds: (c.memberIds ?? []).filter((id) => id !== contactId), messages: [...c.messages, { id: Date.now(), text: `${contact.name} удалён(а) из группы.`, time: t, mine: false }] };
+    }));
   };
 
-  const filtered = chats.filter(
-    (c) =>
-      (tab === 'chats' ? !c.archived : c.archived) &&
-      (c.name.toLowerCase().includes(query.toLowerCase()) || c.role.toLowerCase().includes(query.toLowerCase()))
-  );
+  // ── производные ─────────────────────────────────────────────────────────
 
+  const filtered = chats.filter((c) =>
+    (tab === 'chats' ? !c.archived : c.archived) &&
+    (c.name.toLowerCase().includes(query.toLowerCase()) || c.role.toLowerCase().includes(query.toLowerCase()))
+  );
   const activeMemberIds = activeChat?.memberIds ?? [];
   const activeMembers = ALL_CONTACTS.filter((ct) => activeMemberIds.includes(ct.id));
-  const nonMembers = ALL_CONTACTS.filter(
-    (ct) => !activeMemberIds.includes(ct.id) && ct.name.toLowerCase().includes(addMemberSearch.toLowerCase())
-  );
-  const filteredGroupContacts = ALL_CONTACTS.filter(
-    (ct) => ct.name.toLowerCase().includes(groupContactSearch.toLowerCase())
-  );
+  const nonMembers = ALL_CONTACTS.filter((ct) => !activeMemberIds.includes(ct.id) && ct.name.toLowerCase().includes(addMemberSearch.toLowerCase()));
+  const filteredGroupContacts = ALL_CONTACTS.filter((ct) => ct.name.toLowerCase().includes(groupContactSearch.toLowerCase()));
+
+  // ── рендер ──────────────────────────────────────────────────────────────
 
   return (
     <div className="h-screen w-full flex bg-background text-foreground overflow-hidden" onClick={() => setContextMenu(null)}>
 
-      {/* Узкая навигация */}
+      {/* Навигация */}
       <nav className="hidden md:flex w-16 flex-col items-center justify-between py-6 bg-primary text-primary-foreground">
         <div className="flex flex-col items-center gap-6">
-          <div className="w-10 h-10 rounded-md bg-primary-foreground/15 flex items-center justify-center font-bold tracking-tight text-sm">КМ</div>
+          <div className="w-10 h-10 rounded-md bg-primary-foreground/15 flex items-center justify-center font-bold text-sm">КМ</div>
           {[
             { icon: 'MessageSquare', active: tab === 'chats',   onClick: () => setTab('chats') },
             { icon: 'Archive',       active: tab === 'archive', onClick: () => setTab('archive') },
@@ -281,11 +453,8 @@ export default function Index() {
           <button className="w-10 h-10 rounded-md flex items-center justify-center hover:bg-primary-foreground/10 transition-colors">
             <Icon name="Settings" size={20} />
           </button>
-          <button
-            onClick={() => navigate('/login')}
-            title="Выйти"
-            className="w-10 h-10 rounded-md flex items-center justify-center hover:bg-primary-foreground/10 transition-colors opacity-70 hover:opacity-100"
-          >
+          <button onClick={() => navigate('/login')} title="Выйти"
+            className="w-10 h-10 rounded-md flex items-center justify-center hover:bg-primary-foreground/10 transition-colors opacity-70 hover:opacity-100">
             <Icon name="LogOut" size={18} />
           </button>
         </div>
@@ -301,8 +470,7 @@ export default function Index() {
                 {tab === 'chats' ? 'Сообщения' : 'Архив'}
               </h1>
               <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                <Icon name="ShieldCheck" size={12} className="text-primary" />
-                Сквозное шифрование
+                <Icon name="ShieldCheck" size={12} className="text-primary" />Сквозное шифрование
               </p>
             </div>
             <div className="flex items-center gap-1">
@@ -319,7 +487,7 @@ export default function Index() {
           </div>
           <div className="relative">
             <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по чатам и контактам"
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск"
               className="w-full h-10 pl-9 pr-3 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground" />
           </div>
         </header>
@@ -344,17 +512,14 @@ export default function Index() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium text-sm truncate flex items-center gap-1.5">
-                    {chat.group && <Icon name="Users" size={12} className="text-primary shrink-0" />}
-                    {chat.name}
+                    {chat.group && <Icon name="Users" size={12} className="text-primary shrink-0" />}{chat.name}
                   </span>
                   <span className="text-[11px] text-muted-foreground shrink-0">{chat.time}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2 mt-0.5">
                   <span className="text-xs text-muted-foreground truncate">{chat.last}</span>
                   {chat.unread > 0 && (
-                    <span className="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-[11px] font-medium flex items-center justify-center">
-                      {chat.unread}
-                    </span>
+                    <span className="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-[11px] font-medium flex items-center justify-center">{chat.unread}</span>
                   )}
                 </div>
               </div>
@@ -362,14 +527,17 @@ export default function Index() {
           ))}
         </div>
 
-        <div className="px-5 py-3.5 border-t border-border flex items-center gap-3">
-          <div className="w-9 h-9 rounded-md bg-primary text-primary-foreground flex items-center justify-center text-sm font-semibold">ИП</div>
+        {/* Профиль */}
+        <button onClick={() => setShowProfile(true)} className="px-5 py-3.5 border-t border-border flex items-center gap-3 w-full text-left hover:bg-secondary/40 transition-colors">
+          <Avatar url={profile.avatarUrl} initials={profile.initials} size={9} />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium truncate">Иван Петров</p>
-            <p className="text-xs text-green-600 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500" /> В сети</p>
+            <p className="text-sm font-medium truncate">{profile.name}</p>
+            <p className="text-xs text-green-600 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500" />{profile.status}
+            </p>
           </div>
-          <button className="text-muted-foreground hover:text-foreground transition-colors"><Icon name="Settings" size={18} /></button>
-        </div>
+          <Icon name="ChevronRight" size={16} className="text-muted-foreground shrink-0" />
+        </button>
       </aside>
 
       {/* Окно переписки */}
@@ -382,28 +550,23 @@ export default function Index() {
                   {activeChat.avatar}
                 </div>
                 <div className="min-w-0">
-                  <p className="font-semibold text-sm leading-tight flex items-center gap-1.5 truncate">
+                  <p className="font-semibold text-sm leading-tight flex items-center gap-1.5">
                     {activeChat.group && <Icon name="Users" size={13} className="text-primary shrink-0" />}
                     {activeChat.name}
-                    {activeChat.archived && (
-                      <span className="ml-1 text-[10px] font-normal bg-muted text-muted-foreground px-1.5 py-0.5 rounded">Архив</span>
-                    )}
+                    {activeChat.archived && <span className="ml-1 text-[10px] font-normal bg-muted text-muted-foreground px-1.5 py-0.5 rounded">Архив</span>}
                   </p>
                   <p className="text-xs text-muted-foreground truncate">
-                    {activeChat.group
-                      ? `${activeMembers.length} участник${activeMembers.length === 1 ? '' : activeMembers.length < 5 ? 'а' : 'ов'}`
-                      : activeChat.online ? 'В сети' : activeChat.role}
+                    {activeChat.group ? `${activeMembers.length} участник${activeMembers.length === 1 ? '' : activeMembers.length < 5 ? 'а' : 'ов'}` : activeChat.online ? 'В сети' : activeChat.role}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 <button onClick={() => activeChat.archived ? unarchiveChat(activeChat.id) : archiveChat(activeChat.id)}
-                  title={activeChat.archived ? 'Вернуть из архива' : 'В архив'}
                   className="w-9 h-9 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
                   <Icon name={activeChat.archived ? 'ArchiveRestore' : 'Archive'} size={18} />
                 </button>
                 {activeChat.group && (
-                  <button onClick={() => setShowMembers((v) => !v)} title="Участники"
+                  <button onClick={() => setShowMembers((v) => !v)}
                     className={`w-9 h-9 rounded-md flex items-center justify-center transition-colors ${showMembers ? 'bg-accent text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}>
                     <Icon name="Users" size={18} />
                   </button>
@@ -422,26 +585,55 @@ export default function Index() {
                 <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
                   <div className="flex justify-center">
                     <span className="text-[11px] text-muted-foreground bg-secondary px-3 py-1 rounded-full flex items-center gap-1.5">
-                      <Icon name="Lock" size={11} />
-                      Сообщения защищены сквозным шифрованием
+                      <Icon name="Lock" size={11} />Сообщения защищены сквозным шифрованием
                     </span>
                   </div>
                   {activeChat.messages.map((m) => (
                     <div key={m.id} className={`flex animate-fade-in ${m.mine ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[70%] px-4 py-2.5 rounded-lg text-sm leading-relaxed ${m.mine ? 'bg-primary text-primary-foreground rounded-br-sm' : 'bg-card border border-border rounded-bl-sm'}`}>
-                        <p>{m.text}</p>
-                        <span className={`block text-[10px] mt-1 text-right ${m.mine ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>{m.time}</span>
+                      <div className={`max-w-[70%] ${m.media?.type === 'circle' ? '' : 'px-4 py-2.5 rounded-lg'} text-sm leading-relaxed ${m.media?.type === 'circle' ? '' : m.mine ? 'bg-primary text-primary-foreground rounded-br-sm' : 'bg-card border border-border rounded-bl-sm'}`}>
+                        {/* Медиа */}
+                        {m.media?.type === 'image' && (
+                          <div className="space-y-1">
+                            <img src={m.media.url} alt="" className="max-w-xs rounded-lg cursor-pointer hover:opacity-90 transition-opacity" onClick={() => setLightbox(m.media!)} />
+                            {m.media.name && <p className={`text-[10px] ${m.mine ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>{m.media.name}</p>}
+                          </div>
+                        )}
+                        {m.media?.type === 'video' && (
+                          <div className="space-y-1">
+                            <video src={m.media.url} controls className="max-w-xs rounded-lg" />
+                            {m.media.name && <p className={`text-[10px] ${m.mine ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>{m.media.name}</p>}
+                          </div>
+                        )}
+                        {m.media?.type === 'circle' && (
+                          <video src={m.media.url} controls className="w-40 h-40 rounded-full object-cover border-4 border-primary cursor-pointer" onClick={() => setLightbox(m.media!)} />
+                        )}
+                        {/* Текст */}
+                        {m.text && <p className={m.media ? 'mt-1' : ''}>{m.text}</p>}
+                        {!m.media && (
+                          <span className={`block text-[10px] mt-1 text-right ${m.mine ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>{m.time}</span>
+                        )}
                       </div>
                     </div>
                   ))}
                   <div ref={messagesEndRef} />
                 </div>
 
+                {/* Ввод */}
                 <footer className="px-6 py-4 border-t border-border bg-card shrink-0">
                   <div className="flex items-end gap-2">
-                    <button className="w-10 h-10 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors shrink-0">
+                    {/* Прикрепить файл */}
+                    <button onClick={() => fileInputRef.current?.click()}
+                      className="w-10 h-10 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors shrink-0" title="Прикрепить фото/видео">
                       <Icon name="Paperclip" size={20} />
                     </button>
+                    <input ref={fileInputRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={handleFileSelect} />
+
+                    {/* Видео-кружок */}
+                    <button onClick={() => setShowCircle(true)}
+                      className="w-10 h-10 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors shrink-0" title="Записать видео-кружок">
+                      <Icon name="CirclePlay" size={20} />
+                    </button>
+
                     <input value={draft} onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                       placeholder="Введите сообщение…"
@@ -454,61 +646,40 @@ export default function Index() {
                 </footer>
               </div>
 
-              {/* Панель участников */}
+              {/* Участники группы */}
               {showMembers && activeChat.group && (
                 <aside className="w-72 border-l border-border bg-card flex flex-col shrink-0 animate-fade-in">
                   <div className="px-5 py-4 border-b border-border">
-                    <p className="font-semibold text-sm">Участники группы</p>
+                    <p className="font-semibold text-sm">Участники</p>
                     <p className="text-xs text-muted-foreground mt-0.5">{activeMembers.length} чел.</p>
                   </div>
-
-                  {/* Поиск для добавления */}
                   <div className="px-4 py-3 border-b border-border">
                     <div className="relative">
                       <Icon name="UserPlus" size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                      <input value={addMemberSearch} onChange={(e) => setAddMemberSearch(e.target.value)}
-                        placeholder="Добавить участника…"
+                      <input value={addMemberSearch} onChange={(e) => setAddMemberSearch(e.target.value)} placeholder="Добавить участника…"
                         className="w-full h-9 pl-9 pr-3 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground" />
                     </div>
                     {addMemberSearch && nonMembers.length > 0 && (
                       <div className="mt-2 rounded-md border border-border bg-background shadow-sm overflow-hidden">
                         {nonMembers.map((ct) => (
-                          <button key={ct.id} onClick={() => addMember(ct.id)}
-                            className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-secondary transition-colors">
+                          <button key={ct.id} onClick={() => addMember(ct.id)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-secondary transition-colors">
                             <div className="w-7 h-7 rounded-md bg-secondary flex items-center justify-center text-xs font-semibold shrink-0">{ct.avatar}</div>
-                            <div className="min-w-0">
-                              <p className="text-xs font-medium truncate">{ct.name}</p>
-                              <p className="text-[10px] text-muted-foreground truncate">{ct.role}</p>
-                            </div>
+                            <div className="min-w-0"><p className="text-xs font-medium truncate">{ct.name}</p><p className="text-[10px] text-muted-foreground truncate">{ct.role}</p></div>
                             <Icon name="Plus" size={14} className="text-primary ml-auto shrink-0" />
                           </button>
                         ))}
-                        {nonMembers.length === 0 && addMemberSearch && (
-                          <p className="text-xs text-muted-foreground px-3 py-2">Не найдено</p>
-                        )}
                       </div>
                     )}
                   </div>
-
-                  {/* Список участников */}
                   <div className="flex-1 overflow-y-auto">
-                    {activeMembers.length === 0 && (
-                      <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-xs gap-2">
-                        <Icon name="Users" size={28} className="opacity-20" />
-                        <span>Нет участников</span>
-                      </div>
-                    )}
                     {activeMembers.map((ct) => (
                       <div key={ct.id} className="flex items-center gap-3 px-4 py-3 border-b border-border/60 group">
                         <div className="relative shrink-0">
                           <div className="w-9 h-9 rounded-md bg-secondary flex items-center justify-center text-xs font-semibold">{ct.avatar}</div>
                           {ct.online && <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-card" />}
                         </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium truncate">{ct.name}</p>
-                          <p className="text-[10px] text-muted-foreground truncate">{ct.role}</p>
-                        </div>
-                        <button onClick={() => removeMember(ct.id)} title="Удалить из группы"
+                        <div className="min-w-0 flex-1"><p className="text-xs font-medium truncate">{ct.name}</p><p className="text-[10px] text-muted-foreground truncate">{ct.role}</p></div>
+                        <button onClick={() => removeMember(ct.id)}
                           className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all shrink-0">
                           <Icon name="UserMinus" size={14} />
                         </button>
@@ -521,8 +692,7 @@ export default function Index() {
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center text-muted-foreground flex-col gap-3">
-            <Icon name="MessageSquare" size={48} className="opacity-20" />
-            <p className="text-sm">Выберите чат</p>
+            <Icon name="MessageSquare" size={48} className="opacity-20" /><p className="text-sm">Выберите чат</p>
           </div>
         )}
       </main>
@@ -530,30 +700,23 @@ export default function Index() {
       {/* Контекстное меню */}
       {contextMenu && (
         <div className="fixed z-50 bg-card border border-border rounded-lg shadow-lg py-1 min-w-[180px] animate-fade-in"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onClick={(e) => e.stopPropagation()}>
+          style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(e) => e.stopPropagation()}>
           {chats.find((c) => c.id === contextMenu.chatId)?.archived ? (
-            <button onClick={() => unarchiveChat(contextMenu.chatId)}
-              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-secondary transition-colors">
-              <Icon name="ArchiveRestore" size={16} className="text-muted-foreground" />
-              Вернуть из архива
+            <button onClick={() => unarchiveChat(contextMenu.chatId)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-secondary transition-colors">
+              <Icon name="ArchiveRestore" size={16} className="text-muted-foreground" />Вернуть из архива
             </button>
           ) : (
-            <button onClick={() => archiveChat(contextMenu.chatId)}
-              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-secondary transition-colors">
-              <Icon name="Archive" size={16} className="text-muted-foreground" />
-              Отправить в архив
+            <button onClick={() => archiveChat(contextMenu.chatId)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-secondary transition-colors">
+              <Icon name="Archive" size={16} className="text-muted-foreground" />Отправить в архив
             </button>
           )}
-          <button onClick={() => setContextMenu(null)}
-            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-destructive hover:bg-secondary transition-colors">
-            <Icon name="Trash2" size={16} />
-            Удалить чат
+          <button onClick={() => setContextMenu(null)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-destructive hover:bg-secondary transition-colors">
+            <Icon name="Trash2" size={16} />Удалить чат
           </button>
         </div>
       )}
 
-      {/* Модальное окно — создать группу */}
+      {/* Создание группы */}
       {showCreateGroup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4 animate-fade-in flex flex-col max-h-[90vh]">
@@ -564,52 +727,34 @@ export default function Index() {
                 <Icon name="X" size={18} />
               </button>
             </div>
-
             <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
               <div>
-                <label className="text-sm font-medium block mb-1.5">Название группы <span className="text-destructive">*</span></label>
-                <input autoFocus value={groupName} onChange={(e) => setGroupName(e.target.value)}
-                  placeholder="Например: Проектная команда"
+                <label className="text-sm font-medium block mb-1.5">Название <span className="text-destructive">*</span></label>
+                <input autoFocus value={groupName} onChange={(e) => setGroupName(e.target.value)} placeholder="Название группы"
                   className="w-full h-10 px-4 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground" />
               </div>
               <div>
                 <label className="text-sm font-medium block mb-1.5">Описание <span className="text-muted-foreground font-normal">(необязательно)</span></label>
-                <input value={groupDesc} onChange={(e) => setGroupDesc(e.target.value)}
-                  placeholder="Например: Разработка продукта"
+                <input value={groupDesc} onChange={(e) => setGroupDesc(e.target.value)} placeholder="Описание"
                   className="w-full h-10 px-4 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground" />
               </div>
-
-              {/* Выбор участников */}
               <div>
-                <label className="text-sm font-medium block mb-1.5">
-                  Участники
-                  {groupSelectedIds.length > 0 && (
-                    <span className="ml-2 text-xs font-normal text-primary">{groupSelectedIds.length} выбрано</span>
-                  )}
-                </label>
+                <label className="text-sm font-medium block mb-1.5">Участники {groupSelectedIds.length > 0 && <span className="text-xs text-primary font-normal ml-1">{groupSelectedIds.length} выбрано</span>}</label>
                 <div className="relative mb-2">
                   <Icon name="Search" size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input value={groupContactSearch} onChange={(e) => setGroupContactSearch(e.target.value)}
-                    placeholder="Поиск контактов…"
+                  <input value={groupContactSearch} onChange={(e) => setGroupContactSearch(e.target.value)} placeholder="Поиск контактов…"
                     className="w-full h-9 pl-9 pr-3 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground" />
                 </div>
                 <div className="rounded-md border border-border overflow-hidden">
                   {filteredGroupContacts.map((ct) => {
-                    const selected = groupSelectedIds.includes(ct.id);
+                    const sel = groupSelectedIds.includes(ct.id);
                     return (
-                      <button key={ct.id}
-                        onClick={() => setGroupSelectedIds((prev) => selected ? prev.filter((id) => id !== ct.id) : [...prev, ct.id])}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 text-left border-b border-border/60 last:border-0 transition-colors ${selected ? 'bg-accent' : 'hover:bg-secondary/60'}`}>
-                        <div className="relative shrink-0">
-                          <div className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center text-xs font-semibold">{ct.avatar}</div>
-                          {ct.online && <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-500 border border-card" />}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium truncate">{ct.name}</p>
-                          <p className="text-[10px] text-muted-foreground truncate">{ct.role}</p>
-                        </div>
-                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${selected ? 'bg-primary border-primary' : 'border-border'}`}>
-                          {selected && <Icon name="Check" size={12} className="text-primary-foreground" />}
+                      <button key={ct.id} onClick={() => setGroupSelectedIds((p) => sel ? p.filter((id) => id !== ct.id) : [...p, ct.id])}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 text-left border-b border-border/60 last:border-0 transition-colors ${sel ? 'bg-accent' : 'hover:bg-secondary/60'}`}>
+                        <div className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center text-xs font-semibold">{ct.avatar}</div>
+                        <div className="min-w-0 flex-1"><p className="text-xs font-medium truncate">{ct.name}</p><p className="text-[10px] text-muted-foreground truncate">{ct.role}</p></div>
+                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${sel ? 'bg-primary border-primary' : 'border-border'}`}>
+                          {sel && <Icon name="Check" size={12} className="text-primary-foreground" />}
                         </div>
                       </button>
                     );
@@ -617,18 +762,32 @@ export default function Index() {
                 </div>
               </div>
             </div>
-
             <div className="px-6 py-4 border-t border-border flex justify-end gap-2 shrink-0">
               <button onClick={() => { setShowCreateGroup(false); setGroupSelectedIds([]); setGroupContactSearch(''); }}
-                className="h-9 px-4 rounded-md text-sm text-muted-foreground hover:bg-secondary transition-colors">
-                Отмена
-              </button>
+                className="h-9 px-4 rounded-md text-sm text-muted-foreground hover:bg-secondary transition-colors">Отмена</button>
               <button onClick={createGroup} disabled={!groupName.trim()}
-                className="h-9 px-5 rounded-md text-sm bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed font-medium">
-                Создать группу
-              </button>
+                className="h-9 px-5 rounded-md text-sm bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed font-medium">Создать</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Профиль */}
+      {showProfile && <ProfilePanel profile={profile} onUpdate={setProfile} onClose={() => setShowProfile(false)} />}
+
+      {/* Видео-кружок */}
+      {showCircle && <VideoCircleRecorder onSend={sendCircle} onClose={() => setShowCircle(false)} />}
+
+      {/* Лайтбокс */}
+      {lightbox && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80" onClick={() => setLightbox(null)}>
+          {lightbox.type === 'image'
+            ? <img src={lightbox.url} alt="" className="max-w-full max-h-full rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
+            : <video src={lightbox.url} controls autoPlay className="max-w-full max-h-full rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
+          }
+          <button onClick={() => setLightbox(null)} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-white hover:bg-white/20 transition-colors">
+            <Icon name="X" size={20} />
+          </button>
         </div>
       )}
     </div>
