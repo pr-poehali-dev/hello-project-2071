@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import { useNotifications, SOUNDS, type SoundId } from '@/hooks/use-notifications';
+import CallScreen from '@/components/CallScreen';
 
 // ─── настройки внешнего вида ────────────────────────────────────────────────
 
@@ -391,6 +392,7 @@ export default function Index() {
   const [showCircle, setShowCircle] = useState(false);
   const [lightbox, setLightbox] = useState<MediaAttachment | null>(null);
   const [showNotifBanner, setShowNotifBanner] = useState(false);
+  const [activeCall, setActiveCall] = useState<{ type: 'audio' | 'video' } | null>(null);
 
   // группа
   const [showCreateGroup, setShowCreateGroup] = useState(false);
@@ -674,7 +676,12 @@ export default function Index() {
                   </button>
                 )}
                 {['Phone', 'Video', 'Search', 'MoreVertical'].map((ic) => (
-                  <button key={ic} className="w-9 h-9 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
+                  <button key={ic}
+                    onClick={() => {
+                      if (ic === 'Phone') setActiveCall({ type: 'audio' });
+                      if (ic === 'Video') setActiveCall({ type: 'video' });
+                    }}
+                    className="w-9 h-9 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
                     <Icon name={ic} size={18} />
                   </button>
                 ))}
@@ -873,6 +880,16 @@ export default function Index() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Экран звонка */}
+      {activeCall && activeChat && (
+        <CallScreen
+          type={activeCall.type}
+          name={activeChat.name}
+          avatar={activeChat.avatar}
+          onClose={() => setActiveCall(null)}
+        />
       )}
 
       {/* Профиль */}
