@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
-import { useNotifications } from '@/hooks/use-notifications';
+import { useNotifications, SOUNDS, type SoundId } from '@/hooks/use-notifications';
 
 // ─── типы ────────────────────────────────────────────────────────────────────
 
@@ -323,7 +323,8 @@ const INCOMING: { chatId: number; sender: string; text: string; delay: number }[
 
 export default function Index() {
   const navigate = useNavigate();
-  const { permission, requestPermission, notify, soundEnabled, setSoundEnabled } = useNotifications();
+  const { permission, requestPermission, notify, soundEnabled, setSoundEnabled, soundId, setSoundId, playSound } = useNotifications();
+  const [showSoundSettings, setShowSoundSettings] = useState(false);
   const [chats, setChats] = useState<Chat[]>(INITIAL_CHATS);
   const [activeId, setActiveId] = useState<number>(1);
   const [draft, setDraft] = useState('');
@@ -485,7 +486,7 @@ export default function Index() {
             { icon: 'Archive',       active: tab === 'archive', onClick: () => setTab('archive') },
             { icon: 'Users',         active: false,             onClick: () => {} },
             { icon: 'Bell',          active: false,             onClick: () => {} },
-            { icon: soundEnabled ? 'Volume2' : 'VolumeX', active: false, onClick: () => setSoundEnabled((v) => !v) },
+            { icon: soundEnabled ? 'Volume2' : 'VolumeX', active: showSoundSettings, onClick: () => setShowSoundSettings((v) => !v) },
           ].map((item, i) => (
             <button key={i} onClick={item.onClick}
               className={`w-10 h-10 rounded-md flex items-center justify-center transition-colors ${item.active ? 'bg-primary-foreground/20' : 'hover:bg-primary-foreground/10'}`}>
@@ -821,6 +822,73 @@ export default function Index() {
 
       {/* Видео-кружок */}
       {showCircle && <VideoCircleRecorder onSend={sendCircle} onClose={() => setShowCircle(false)} />}
+
+      {/* Настройки звука */}
+      {showSoundSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowSoundSettings(false)}>
+          <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-sm mx-4 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-5 border-b border-border">
+              <h2 className="font-semibold text-base">Звук уведомлений</h2>
+              <button onClick={() => setShowSoundSettings(false)} className="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors">
+                <Icon name="X" size={18} />
+              </button>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              {/* Вкл/выкл */}
+              <div className="flex items-center justify-between py-2 border-b border-border">
+                <div className="flex items-center gap-2.5">
+                  <Icon name={soundEnabled ? 'Volume2' : 'VolumeX'} size={18} className="text-muted-foreground" />
+                  <span className="text-sm font-medium">Звуковые уведомления</span>
+                </div>
+                <button
+                  onClick={() => setSoundEnabled((v) => !v)}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${soundEnabled ? 'bg-primary' : 'bg-muted'}`}
+                >
+                  <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${soundEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </div>
+
+              {/* Выбор звука */}
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide pt-1">Выберите звук</p>
+              <div className="space-y-1">
+                {SOUNDS.map((s) => (
+                  <button
+                    key={s.id}
+                    disabled={!soundEnabled}
+                    onClick={() => {
+                      setSoundId(s.id as SoundId);
+                      playSound(s.id as SoundId);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors disabled:opacity-40 ${
+                      soundId === s.id ? 'bg-primary/10 border border-primary/30' : 'hover:bg-secondary border border-transparent'
+                    }`}
+                  >
+                    <span className="text-xl">{s.emoji}</span>
+                    <span className="text-sm font-medium flex-1">{s.label}</span>
+                    {soundId === s.id && <Icon name="Check" size={16} className="text-primary shrink-0" />}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); playSound(s.id as SoundId); }}
+                      disabled={!soundEnabled}
+                      className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors disabled:pointer-events-none"
+                      title="Прослушать"
+                    >
+                      <Icon name="Play" size={14} />
+                    </button>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-border">
+              <button
+                onClick={() => setShowSoundSettings(false)}
+                className="w-full h-10 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity"
+              >
+                Готово
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Баннер уведомлений */}
       {showNotifBanner && permission === 'default' && (
