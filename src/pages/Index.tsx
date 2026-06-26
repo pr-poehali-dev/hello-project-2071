@@ -3,6 +3,42 @@ import { useNavigate } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import { useNotifications, SOUNDS, type SoundId } from '@/hooks/use-notifications';
 
+// ─── настройки внешнего вида ────────────────────────────────────────────────
+
+type ThemeMode = 'light' | 'dark';
+type FontSize  = 'sm' | 'md' | 'lg' | 'xl';
+
+interface AppSettings {
+  theme: ThemeMode;
+  fontSize: FontSize;
+  wallpaper: string | null;
+}
+
+const WALLPAPERS = [
+  { id: 'none',     label: 'Без фона',      url: null },
+  { id: 'navy',     label: 'Гексагоны',     url: 'https://cdn.poehali.dev/projects/73230b07-9367-48b8-9d97-33cda4a6a593/files/0f7cb25b-7426-4269-86a0-718b2daf4731.jpg' },
+  { id: 'water',    label: 'Акварель',       url: 'https://cdn.poehali.dev/projects/73230b07-9367-48b8-9d97-33cda4a6a593/files/06083f0d-b00c-44d7-bea2-809f6ed517ad.jpg' },
+  { id: 'circuit',  label: 'Схема',          url: 'https://cdn.poehali.dev/projects/73230b07-9367-48b8-9d97-33cda4a6a593/files/18b12cec-0033-47fb-8132-7ff3179c0cbe.jpg' },
+  { id: 'linen',    label: 'Лён',            url: 'https://cdn.poehali.dev/projects/73230b07-9367-48b8-9d97-33cda4a6a593/files/8b9123e3-e590-4456-8c32-63ba17c5871f.jpg' },
+  { id: 'forest',   label: 'Листья',         url: 'https://cdn.poehali.dev/projects/73230b07-9367-48b8-9d97-33cda4a6a593/files/4a70d2b1-a13f-45f6-adbf-d42a323ab136.jpg' },
+  { id: 'blue',     label: 'Градиент',       url: 'https://cdn.poehali.dev/projects/73230b07-9367-48b8-9d97-33cda4a6a593/files/1e8ae987-b0bb-4568-b888-6c6c99ed6046.jpg' },
+];
+
+const FONT_SIZES: { id: FontSize; label: string; size: string }[] = [
+  { id: 'sm', label: 'Маленький', size: '12px' },
+  { id: 'md', label: 'Средний',   size: '14px' },
+  { id: 'lg', label: 'Крупный',   size: '16px' },
+  { id: 'xl', label: 'Очень крупный', size: '18px' },
+];
+
+const DEFAULT_SETTINGS: AppSettings = { theme: 'light', fontSize: 'md', wallpaper: null };
+
+function applySettings(s: AppSettings) {
+  const root = document.documentElement;
+  root.classList.toggle('dark', s.theme === 'dark');
+  root.setAttribute('data-fontsize', s.fontSize);
+}
+
 // ─── типы ────────────────────────────────────────────────────────────────────
 
 interface MediaAttachment {
@@ -325,6 +361,16 @@ export default function Index() {
   const navigate = useNavigate();
   const { permission, requestPermission, notify, soundEnabled, setSoundEnabled, soundId, setSoundId, playSound } = useNotifications();
   const [showSoundSettings, setShowSoundSettings] = useState(false);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'appearance' | 'sound'>('appearance');
+  const wallpaperInputRef = useRef<HTMLInputElement>(null);
+
+  // Применяем настройки при изменении
+  useEffect(() => { applySettings(settings); }, [settings]);
+
+  const updateSettings = (patch: Partial<AppSettings>) =>
+    setSettings((prev) => { const next = { ...prev, ...patch }; applySettings(next); return next; });
   const [chats, setChats] = useState<Chat[]>(INITIAL_CHATS);
   const [activeId, setActiveId] = useState<number>(1);
   const [draft, setDraft] = useState('');
@@ -495,7 +541,8 @@ export default function Index() {
           ))}
         </div>
         <div className="flex flex-col items-center gap-2">
-          <button className="w-10 h-10 rounded-md flex items-center justify-center hover:bg-primary-foreground/10 transition-colors">
+          <button onClick={() => { setSettingsTab('appearance'); setShowSettings(true); }}
+            className={`w-10 h-10 rounded-md flex items-center justify-center transition-colors ${showSettings ? 'bg-primary-foreground/20' : 'hover:bg-primary-foreground/10'}`}>
             <Icon name="Settings" size={20} />
           </button>
           <button onClick={() => navigate('/login')} title="Выйти"
@@ -586,7 +633,8 @@ export default function Index() {
       </aside>
 
       {/* Окно переписки */}
-      <main className="hidden sm:flex flex-1 flex-col bg-background min-w-0">
+      <main className="hidden sm:flex flex-1 flex-col min-w-0 bg-background relative"
+        style={settings.wallpaper ? { backgroundImage: `url(${settings.wallpaper})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}>
         {activeChat ? (
           <>
             <header className="px-6 py-3.5 border-b border-border bg-card flex items-center justify-between shrink-0">
@@ -627,9 +675,10 @@ export default function Index() {
             <div className="flex-1 flex min-h-0">
               {/* Сообщения */}
               <div className="flex-1 flex flex-col min-w-0">
-                <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
+                <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4"
+                  style={settings.wallpaper ? { backdropFilter: 'brightness(0.97)' } : {}}>
                   <div className="flex justify-center">
-                    <span className="text-[11px] text-muted-foreground bg-secondary px-3 py-1 rounded-full flex items-center gap-1.5">
+                    <span className="text-[11px] text-muted-foreground bg-secondary/90 px-3 py-1 rounded-full flex items-center gap-1.5">
                       <Icon name="Lock" size={11} />Сообщения защищены сквозным шифрованием
                     </span>
                   </div>
@@ -822,6 +871,157 @@ export default function Index() {
 
       {/* Видео-кружок */}
       {showCircle && <VideoCircleRecorder onSend={sendCircle} onClose={() => setShowCircle(false)} />}
+
+      {/* ── Настройки приложения ── */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowSettings(false)}>
+          <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-lg mx-4 animate-fade-in flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-5 border-b border-border shrink-0">
+              <h2 className="font-semibold text-base">Настройки</h2>
+              <button onClick={() => setShowSettings(false)} className="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors">
+                <Icon name="X" size={18} />
+              </button>
+            </div>
+
+            {/* Вкладки */}
+            <div className="flex border-b border-border shrink-0">
+              {[
+                { key: 'appearance', label: 'Внешний вид', icon: 'Palette' },
+                { key: 'sound',      label: 'Звук',        icon: 'Volume2'  },
+              ].map((t) => (
+                <button key={t.key} onClick={() => setSettingsTab(t.key as typeof settingsTab)}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${settingsTab === t.key ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+                  <Icon name={t.icon} size={16} />{t.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="overflow-y-auto flex-1 px-6 py-5 space-y-6">
+
+              {settingsTab === 'appearance' && (
+                <>
+                  {/* Тема */}
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Тема</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {([
+                        { id: 'light', label: 'Светлая', icon: 'Sun' },
+                        { id: 'dark',  label: 'Тёмная',  icon: 'Moon' },
+                      ] as const).map((t) => (
+                        <button key={t.id} onClick={() => updateSettings({ theme: t.id })}
+                          className={`flex items-center gap-3 px-4 py-3 rounded-lg border-2 transition-colors ${settings.theme === t.id ? 'border-primary bg-accent' : 'border-border hover:bg-secondary'}`}>
+                          <Icon name={t.icon} size={18} className={settings.theme === t.id ? 'text-primary' : 'text-muted-foreground'} />
+                          <span className="text-sm font-medium">{t.label}</span>
+                          {settings.theme === t.id && <Icon name="Check" size={15} className="text-primary ml-auto" />}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Размер шрифта */}
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Размер шрифта</p>
+                    <div className="grid grid-cols-4 gap-2">
+                      {FONT_SIZES.map((f) => (
+                        <button key={f.id} onClick={() => updateSettings({ fontSize: f.id })}
+                          className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-lg border-2 transition-colors ${settings.fontSize === f.id ? 'border-primary bg-accent' : 'border-border hover:bg-secondary'}`}>
+                          <span style={{ fontSize: f.size }} className="font-semibold leading-none text-foreground">Аа</span>
+                          <span className="text-[10px] text-muted-foreground">{f.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Обои */}
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Обои чата</p>
+                    <div className="grid grid-cols-4 gap-2">
+                      {WALLPAPERS.map((w) => (
+                        <button key={w.id} onClick={() => updateSettings({ wallpaper: w.url })}
+                          className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${settings.wallpaper === w.url ? 'border-primary scale-95' : 'border-border hover:border-muted-foreground'}`}>
+                          {w.url
+                            ? <img src={w.url} alt={w.label} className="w-full h-full object-cover" />
+                            : <div className="w-full h-full bg-secondary flex items-center justify-center"><Icon name="Ban" size={20} className="text-muted-foreground" /></div>
+                          }
+                          {settings.wallpaper === w.url && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
+                              <Icon name="Check" size={18} className="text-white drop-shadow" />
+                            </div>
+                          )}
+                          <div className="absolute bottom-0 inset-x-0 bg-black/40 px-1 py-0.5">
+                            <p className="text-[9px] text-white text-center truncate">{w.label}</p>
+                          </div>
+                        </button>
+                      ))}
+
+                      {/* Загрузить своё */}
+                      <button onClick={() => wallpaperInputRef.current?.click()}
+                        className="aspect-square rounded-lg border-2 border-dashed border-border hover:border-primary flex flex-col items-center justify-center gap-1 transition-colors">
+                        <Icon name="Upload" size={18} className="text-muted-foreground" />
+                        <span className="text-[9px] text-muted-foreground text-center">Своё фото</span>
+                      </button>
+                      <input ref={wallpaperInputRef} type="file" accept="image/*" className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]; if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = (ev) => updateSettings({ wallpaper: ev.target?.result as string });
+                          reader.readAsDataURL(file);
+                          e.target.value = '';
+                        }} />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {settingsTab === 'sound' && (
+                <>
+                  {/* Вкл/выкл */}
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Звук уведомлений</p>
+                    <div className="flex items-center justify-between py-3 px-4 rounded-lg bg-secondary">
+                      <div className="flex items-center gap-2.5">
+                        <Icon name={soundEnabled ? 'Volume2' : 'VolumeX'} size={18} className="text-muted-foreground" />
+                        <span className="text-sm font-medium">Включить звук</span>
+                      </div>
+                      <button onClick={() => setSoundEnabled((v) => !v)}
+                        className={`relative w-11 h-6 rounded-full transition-colors ${soundEnabled ? 'bg-primary' : 'bg-muted'}`}>
+                        <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${soundEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Выбор звука */}
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Тип звука</p>
+                    <div className="space-y-1">
+                      {SOUNDS.map((s) => (
+                        <button key={s.id} disabled={!soundEnabled}
+                          onClick={() => { setSoundId(s.id as SoundId); playSound(s.id as SoundId); }}
+                          className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors disabled:opacity-40 ${soundId === s.id ? 'bg-primary/10 border border-primary/30' : 'hover:bg-secondary border border-transparent'}`}>
+                          <span className="text-xl">{s.emoji}</span>
+                          <span className="text-sm font-medium flex-1">{s.label}</span>
+                          {soundId === s.id && <Icon name="Check" size={16} className="text-primary shrink-0" />}
+                          <button onClick={(e) => { e.stopPropagation(); playSound(s.id as SoundId); }} disabled={!soundEnabled}
+                            className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors disabled:pointer-events-none" title="Прослушать">
+                            <Icon name="Play" size={14} />
+                          </button>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-border shrink-0">
+              <button onClick={() => setShowSettings(false)}
+                className="w-full h-10 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity">
+                Готово
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Настройки звука */}
       {showSoundSettings && (
