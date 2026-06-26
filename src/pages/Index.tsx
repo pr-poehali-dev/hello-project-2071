@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
+import { useNotifications } from '@/hooks/use-notifications';
 
 // ─── типы ────────────────────────────────────────────────────────────────────
 
@@ -313,8 +314,16 @@ function VideoCircleRecorder({ onSend, onClose }: { onSend: (url: string) => voi
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
+// Симуляция входящих сообщений
+const INCOMING: { chatId: number; sender: string; text: string; delay: number }[] = [
+  { chatId: 2, sender: 'Елена Воронцова', text: 'Иван, когда удобно созвониться?', delay: 18000 },
+  { chatId: 1, sender: 'Алексей Громов',  text: 'Коллеги, прошу подтвердить присутствие на совещании.', delay: 35000 },
+  { chatId: 3, sender: 'Дмитрий Соколов', text: 'Я отправил материалы на почту.', delay: 52000 },
+];
+
 export default function Index() {
   const navigate = useNavigate();
+  const { permission, requestPermission, notify } = useNotifications();
   const [chats, setChats] = useState<Chat[]>(INITIAL_CHATS);
   const [activeId, setActiveId] = useState<number>(1);
   const [draft, setDraft] = useState('');
@@ -325,6 +334,7 @@ export default function Index() {
   const [showProfile, setShowProfile] = useState(false);
   const [showCircle, setShowCircle] = useState(false);
   const [lightbox, setLightbox] = useState<MediaAttachment | null>(null);
+  const [showNotifBanner, setShowNotifBanner] = useState(false);
 
   // группа
   const [showCreateGroup, setShowCreateGroup] = useState(false);
@@ -345,6 +355,39 @@ export default function Index() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeId, activeChat?.messages.length]);
   useEffect(() => { setShowMembers(false); }, [activeId]);
+
+  // Показываем баннер с предложением включить уведомления
+  useEffect(() => {
+    if (permission === 'default') {
+      const t = setTimeout(() => setShowNotifBanner(true), 2000);
+      return () => clearTimeout(t);
+    }
+  }, [permission]);
+
+  // Симуляция входящих сообщений
+  useEffect(() => {
+    const timers = INCOMING.map(({ chatId, sender, text, delay }) =>
+      setTimeout(() => {
+        const t = nowTime();
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === chatId
+              ? { ...c, last: `${sender.split(' ')[0]}: ${text}`, time: t, unread: c.id === activeId ? 0 : c.unread + 1, messages: [...c.messages, { id: Date.now() + chatId, text, time: t, mine: false }] }
+              : c
+          )
+        );
+        // Уведомление только если этот чат не активен
+        setActiveId((cur) => {
+          if (cur !== chatId) {
+            notify(sender, text, `chat-${chatId}`);
+          }
+          return cur;
+        });
+      }, delay)
+    );
+    return () => timers.forEach(clearTimeout);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notify]);
 
   // ── отправка сообщений ───────────────────────────────────────────────────
 
@@ -777,6 +820,38 @@ export default function Index() {
 
       {/* Видео-кружок */}
       {showCircle && <VideoCircleRecorder onSend={sendCircle} onClose={() => setShowCircle(false)} />}
+
+      {/* Баннер уведомлений */}
+      {showNotifBanner && permission === 'default' && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
+          <div className="bg-card border border-border rounded-xl shadow-xl px-5 py-4 flex items-center gap-4 max-w-sm w-full">
+            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              <Icon name="Bell" size={20} className="text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Включить уведомления?</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Получайте оповещения о новых сообщениях</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => setShowNotifBanner(false)}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1"
+              >
+                Позже
+              </button>
+              <button
+                onClick={async () => {
+                  await requestPermission();
+                  setShowNotifBanner(false);
+                }}
+                className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-md hover:opacity-90 transition-opacity font-medium"
+              >
+                Включить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Лайтбокс */}
       {lightbox && (
