@@ -361,13 +361,22 @@ export default function Index() {
   const navigate = useNavigate();
   const { permission, requestPermission, notify, soundEnabled, setSoundEnabled, soundId, setSoundId, playSound } = useNotifications();
   const [showSoundSettings, setShowSoundSettings] = useState(false);
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<AppSettings>(() => {
+    try {
+      const saved = localStorage.getItem('km-settings');
+      if (saved) return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) as AppSettings };
+    } catch (e) { console.warn('settings load failed', e); }
+    return DEFAULT_SETTINGS;
+  });
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'appearance' | 'sound'>('appearance');
   const wallpaperInputRef = useRef<HTMLInputElement>(null);
 
-  // Применяем настройки при изменении
-  useEffect(() => { applySettings(settings); }, [settings]);
+  // Применяем и сохраняем настройки при изменении
+  useEffect(() => {
+    applySettings(settings);
+    try { localStorage.setItem('km-settings', JSON.stringify(settings)); } catch (e) { console.warn(e); }
+  }, [settings]);
 
   const updateSettings = (patch: Partial<AppSettings>) =>
     setSettings((prev) => { const next = { ...prev, ...patch }; applySettings(next); return next; });

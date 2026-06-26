@@ -91,11 +91,24 @@ const PLAYERS: Record<SoundId, (ctx: AudioContext) => void> = {
   },
 };
 
+function loadSound(): { enabled: boolean; id: SoundId } {
+  try {
+    const s = localStorage.getItem('km-sound');
+    if (s) return JSON.parse(s) as { enabled: boolean; id: SoundId };
+  } catch (e) { console.warn(e); }
+  return { enabled: true, id: 'ping' };
+}
+
 export function useNotifications() {
   const [permission, setPermission] = useState<Permission>('default');
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [soundId, setSoundId] = useState<SoundId>('ping');
+  const [soundEnabled, setSoundEnabled] = useState(() => loadSound().enabled);
+  const [soundId, setSoundId] = useState<SoundId>(() => loadSound().id);
   const audioCtxRef = useRef<AudioContext | null>(null);
+
+  // Сохраняем при изменении
+  useEffect(() => {
+    try { localStorage.setItem('km-sound', JSON.stringify({ enabled: soundEnabled, id: soundId })); } catch (e) { console.warn(e); }
+  }, [soundEnabled, soundId]);
 
   useEffect(() => {
     if ('Notification' in window) setPermission(Notification.permission as Permission);
