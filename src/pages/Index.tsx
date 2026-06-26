@@ -820,8 +820,8 @@ export default function Index() {
               <Icon name="Archive" size={16} className="text-muted-foreground" />Отправить в архив
             </button>
           )}
-          <button onClick={() => setContextMenu(null)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-destructive hover:bg-secondary transition-colors">
-            <Icon name="Trash2" size={16} />Удалить чат
+          <button onClick={() => setContextMenu(null)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-secondary transition-colors">
+            <Icon name="BellOff" size={16} className="text-muted-foreground" />Отключить уведомления
           </button>
         </div>
       )}

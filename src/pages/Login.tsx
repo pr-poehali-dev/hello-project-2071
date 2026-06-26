@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import Icon from '@/components/ui/icon';
@@ -9,15 +9,35 @@ interface SavedAccount {
   role: string;
   initials: string;
   avatarUrl: string | null;
+  phone: string;
 }
 
-const DEMO_USERS = [
-  { login: 'ivanov',     password: '1234', name: 'Иван Петров',     role: 'Генеральный директор',  initials: 'ИП' },
-  { login: 'vorontsova', password: '1234', name: 'Елена Воронцова', role: 'Финансовый директор',   initials: 'ЕВ' },
-  { login: 'sokolov',    password: '1234', name: 'Дмитрий Соколов', role: 'Рук. отдела продаж',    initials: 'ДС' },
-];
+type Mode = 'accounts' | 'phone' | 'code' | 'register' | 'qr';
+
+const DEMO_PHONES: Record<string, { name: string; role: string; initials: string }> = {
+  '+7 900 000 0001': { name: 'Иван Петров',     role: 'Генеральный директор', initials: 'ИП' },
+  '+7 900 000 0002': { name: 'Елена Воронцова', role: 'Финансовый директор',  initials: 'ЕВ' },
+  '+7 900 000 0003': { name: 'Дмитрий Соколов', role: 'Рук. отдела продаж',   initials: 'ДС' },
+};
 
 const QR_SESSION = `${typeof window !== 'undefined' ? window.location.origin : ''}?qr=1&s=${Math.random().toString(36).slice(2, 10)}`;
+const RESEND_TIMEOUT = 60;
+
+function formatPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 11);
+  if (!digits) return '';
+  let out = '+';
+  if (digits[0] === '7' || digits[0] === '8') {
+    out += '7';
+    if (digits.length > 1) out += ' ' + digits.slice(1, 4);
+    if (digits.length > 4) out += ' ' + digits.slice(4, 7);
+    if (digits.length > 7) out += ' ' + digits.slice(7, 9);
+    if (digits.length > 9) out += ' ' + digits.slice(9, 11);
+  } else {
+    out += digits;
+  }
+  return out;
+}
 
 function Avatar({ url, initials, size = 12 }: { url: string | null; initials: string; size?: number }) {
   const sz = `w-${size} h-${size}`;
@@ -27,25 +47,30 @@ function Avatar({ url, initials, size = 12 }: { url: string | null; initials: st
 
 export default function Login() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<'accounts' | 'login' | 'register'>('accounts');
-  const [loginTab, setLoginTab] = useState<'password' | 'qr'>('password');
+  const [mode, setMode] = useState<Mode>('accounts');
 
   // Сохранённые аккаунты
-  const [accounts, setAccounts] = useState<SavedAccount[]>([
-    { id: '1', name: 'Иван Петров', role: 'Генеральный директор', initials: 'ИП', avatarUrl: null },
-  ]);
+  const [accounts, setAccounts] = useState<SavedAccount[]>(() => {
+    try {
+      const s = localStorage.getItem('km-accounts');
+      if (s) return JSON.parse(s) as SavedAccount[];
+    } catch { /* ignore */ }
+    return [{ id: '1', name: 'Иван Петров', role: 'Генеральный директор', initials: 'ИП', avatarUrl: null, phone: '+7 900 000 0001' }];
+  });
 
-  // Форма входа
-  const [login, setLogin] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPass, setShowPass] = useState(false);
-  const [error, setError] = useState('');
+  // Вход по телефону
+  const [phone, setPhone] = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const [generatedCode, setGeneratedCode] = useState('');
+  const [codeDigits, setCodeDigits] = useState(['', '', '', '']);
+  const [codeError, setCodeError] = useState('');
+  const [resendTimer, setResendTimer] = useState(0);
+  const codeRefs = [useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null)];
 
-  // Форма регистрации нового аккаунта
+  // Регистрация
   const [regName, setRegName] = useState('');
   const [regRole, setRegRole] = useState('');
-  const [regLogin, setRegLogin] = useState('');
-  const [regPass, setRegPass] = useState('');
+  const [regPhone, setRegPhone] = useState('');
   const [regAvatar, setRegAvatar] = useState<string | null>(null);
   const [regError, setRegError] = useState('');
 
@@ -53,22 +78,73 @@ export default function Login() {
   const [qrScanned, setQrScanned] = useState(false);
   const [qrCountdown, setQrCountdown] = useState(60);
 
+  // Сохраняем аккаунты
   useEffect(() => {
-    if (loginTab !== 'qr') return;
+    try { localStorage.setItem('km-accounts', JSON.stringify(accounts)); } catch { /* ignore */ }
+  }, [accounts]);
+
+  // Таймер повторной отправки
+  useEffect(() => {
+    if (resendTimer <= 0) return;
+    const iv = setInterval(() => setResendTimer((v) => v - 1), 1000);
+    return () => clearInterval(iv);
+  }, [resendTimer]);
+
+  // QR
+  useEffect(() => {
+    if (mode !== 'qr') return;
     setQrScanned(false); setQrCountdown(60);
     const iv = setInterval(() => setQrCountdown((v) => v > 1 ? v - 1 : 0), 1000);
     const t = setTimeout(() => { setQrScanned(true); setTimeout(() => navigate('/'), 1500); }, 8000);
     return () => { clearInterval(iv); clearTimeout(t); };
-  }, [loginTab, navigate]);
+  }, [mode, navigate]);
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault(); setError('');
-    const user = DEMO_USERS.find((u) => u.login === login && u.password === password);
-    if (!user) { setError('Неверный логин или пароль'); return; }
-    // добавляем в список если ещё нет
+  const sendCode = () => {
+    setPhoneError('');
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 11) { setPhoneError('Введите корректный номер телефона'); return; }
+    const code = String(Math.floor(1000 + Math.random() * 9000));
+    setGeneratedCode(code);
+    setCodeDigits(['', '', '', '']);
+    setCodeError('');
+    setResendTimer(RESEND_TIMEOUT);
+    setMode('code');
+    // В демо показываем код в консоли
+    console.info(`📱 Код подтверждения: ${code}`);
+    setTimeout(() => codeRefs[0].current?.focus(), 100);
+  };
+
+  const handleCodeInput = (idx: number, val: string) => {
+    const digit = val.replace(/\D/g, '').slice(-1);
+    const next = [...codeDigits];
+    next[idx] = digit;
+    setCodeDigits(next);
+    setCodeError('');
+    if (digit && idx < 3) codeRefs[idx + 1].current?.focus();
+    // Автопроверка при вводе 4-й цифры
+    if (idx === 3 && digit) verifyCode([...next.slice(0, 3), digit]);
+  };
+
+  const handleCodeKeyDown = (idx: number, e: React.KeyboardEvent) => {
+    if (e.key === 'Backspace' && !codeDigits[idx] && idx > 0) {
+      codeRefs[idx - 1].current?.focus();
+    }
+  };
+
+  const verifyCode = (digits = codeDigits) => {
+    const entered = digits.join('');
+    if (entered.length < 4) { setCodeError('Введите все 4 цифры'); return; }
+    if (entered !== generatedCode) { setCodeError('Неверный код. Попробуйте ещё раз'); setCodeDigits(['', '', '', '']); setTimeout(() => codeRefs[0].current?.focus(), 50); return; }
+
+    // Успех — добавляем аккаунт если нет
+    const fmt = formatPhone(phone);
+    const demo = DEMO_PHONES[fmt];
+    const name  = demo?.name    ?? `Пользователь`;
+    const role  = demo?.role    ?? 'Сотрудник';
+    const initials = demo?.initials ?? fmt.slice(-4);
     setAccounts((prev) => {
-      if (prev.find((a) => a.name === user.name)) return prev;
-      return [...prev, { id: Date.now().toString(), name: user.name, role: user.role, initials: user.initials, avatarUrl: null }];
+      if (prev.find((a) => a.phone === fmt)) return prev;
+      return [...prev, { id: Date.now().toString(), name, role, initials, avatarUrl: null, phone: fmt }];
     });
     navigate('/');
   };
@@ -76,19 +152,12 @@ export default function Login() {
   const handleRegister = (e: React.FormEvent) => {
     e.preventDefault(); setRegError('');
     if (!regName.trim()) { setRegError('Введите имя'); return; }
-    if (!regLogin.trim()) { setRegError('Введите логин'); return; }
-    if (regPass.length < 4) { setRegError('Пароль — минимум 4 символа'); return; }
+    const fmt = formatPhone(regPhone);
+    if (fmt.replace(/\D/g, '').length < 11) { setRegError('Введите номер телефона'); return; }
     const initials = regName.trim().split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase();
-    setAccounts((prev) => [...prev, { id: Date.now().toString(), name: regName.trim(), role: regRole.trim() || 'Сотрудник', initials, avatarUrl: regAvatar }]);
+    setAccounts((prev) => [...prev, { id: Date.now().toString(), name: regName.trim(), role: regRole.trim() || 'Сотрудник', initials, avatarUrl: regAvatar, phone: fmt }]);
     setMode('accounts');
-    setRegName(''); setRegRole(''); setRegLogin(''); setRegPass(''); setRegAvatar(null);
-  };
-
-  const handleAvatarReg = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => setRegAvatar(ev.target?.result as string);
-    reader.readAsDataURL(file);
+    setRegName(''); setRegRole(''); setRegPhone(''); setRegAvatar(null);
   };
 
   return (
@@ -118,112 +187,207 @@ export default function Login() {
               {accounts.map((acc) => (
                 <button key={acc.id} onClick={() => navigate('/')}
                   className="w-full flex items-center gap-4 px-6 py-4 border-b border-border/60 hover:bg-secondary/50 transition-colors text-left">
-                  <Avatar url={acc.avatarUrl} initials={acc.initials} size={12} />
+                  <Avatar url={acc.avatarUrl} initials={acc.initials} size={11} />
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-sm truncate">{acc.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">{acc.role}</p>
+                    <p className="text-xs text-muted-foreground truncate flex items-center gap-1">
+                      <Icon name="Phone" size={11} />{acc.phone}
+                    </p>
                   </div>
                   <Icon name="ChevronRight" size={18} className="text-muted-foreground shrink-0" />
                 </button>
               ))}
             </div>
             <div className="px-6 py-4 flex flex-col gap-2">
-              <button onClick={() => setMode('login')}
+              <button onClick={() => { setPhone(''); setPhoneError(''); setMode('phone'); }}
                 className="w-full h-11 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
-                <Icon name="LogIn" size={16} />Войти в другой аккаунт
+                <Icon name="Phone" size={16} />Войти по номеру телефона
               </button>
-              <button onClick={() => setMode('register')}
-                className="w-full h-11 rounded-md bg-secondary text-sm font-medium hover:bg-secondary/80 transition-colors flex items-center justify-center gap-2">
-                <Icon name="UserPlus" size={16} />Добавить аккаунт
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Вход ── */}
-        {mode === 'login' && (
-          <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden animate-fade-in">
-            <div className="flex border-b border-border">
-              <button onClick={() => setMode('accounts')} className="w-10 h-14 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
-                <Icon name="ArrowLeft" size={18} />
-              </button>
-              {[{ key: 'password', label: 'Логин и пароль', icon: 'KeyRound' }, { key: 'qr', label: 'QR-код', icon: 'QrCode' }].map((t) => (
-                <button key={t.key} onClick={() => setLoginTab(t.key as 'password' | 'qr')}
-                  className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-sm font-medium transition-colors ${loginTab === t.key ? 'text-primary border-b-2 border-primary bg-accent/50' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40'}`}>
-                  <Icon name={t.icon} size={16} />{t.label}
+              <div className="flex gap-2">
+                <button onClick={() => setMode('qr')}
+                  className="flex-1 h-10 rounded-md bg-secondary text-sm font-medium hover:bg-secondary/80 transition-colors flex items-center justify-center gap-1.5">
+                  <Icon name="QrCode" size={15} />QR-код
                 </button>
-              ))}
-            </div>
-
-            {loginTab === 'password' && (
-              <form onSubmit={handleLogin} className="px-6 py-6 space-y-4">
-                <div>
-                  <label className="text-sm font-medium block mb-1.5">Логин</label>
-                  <div className="relative">
-                    <Icon name="User" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                    <input value={login} onChange={(e) => setLogin(e.target.value)} placeholder="ivanov" autoComplete="username"
-                      className="w-full h-11 pl-9 pr-4 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground" />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-sm font-medium block mb-1.5">Пароль</label>
-                  <div className="relative">
-                    <Icon name="Lock" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                    <input type={showPass ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password"
-                      className="w-full h-11 pl-9 pr-10 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground" />
-                    <button type="button" onClick={() => setShowPass((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
-                      <Icon name={showPass ? 'EyeOff' : 'Eye'} size={16} />
-                    </button>
-                  </div>
-                </div>
-                {error && <p className="text-xs text-destructive flex items-center gap-1.5 animate-fade-in"><Icon name="AlertCircle" size={13} />{error}</p>}
-                <button type="submit" className="w-full h-11 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:opacity-90 transition-opacity">Войти</button>
-                <p className="text-center text-xs text-muted-foreground">
-                  Демо: <span className="font-mono text-foreground">ivanov</span> / <span className="font-mono text-foreground">1234</span>
-                </p>
-              </form>
-            )}
-
-            {loginTab === 'qr' && (
-              <div className="px-6 py-6 flex flex-col items-center text-center">
-                {!qrScanned ? (
-                  <>
-                    <p className="text-sm text-muted-foreground mb-5">Откройте мессенджер на телефоне и отсканируйте код</p>
-                    <div className="relative p-3 bg-white rounded-xl border border-border shadow-sm mb-4">
-                      <QRCodeSVG value={QR_SESSION} size={180} bgColor="#ffffff" fgColor="#1e3a5f" level="M" marginSize={1} />
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="w-9 h-9 rounded-md bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold shadow">КМ</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Icon name="Clock" size={13} />Код действует <span className="font-mono text-foreground font-medium ml-1">{qrCountdown}с</span>
-                    </div>
-                    {qrCountdown === 0 && (
-                      <button onClick={() => setLoginTab('qr')} className="mt-3 text-xs text-primary underline underline-offset-2">Обновить QR-код</button>
-                    )}
-                  </>
-                ) : (
-                  <div className="py-6 flex flex-col items-center gap-3 animate-fade-in">
-                    <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
-                      <Icon name="CheckCircle2" size={36} className="text-green-600" />
-                    </div>
-                    <p className="font-semibold text-base">QR-код отсканирован</p>
-                    <p className="text-sm text-muted-foreground">Выполняется вход…</p>
-                  </div>
-                )}
+                <button onClick={() => setMode('register')}
+                  className="flex-1 h-10 rounded-md bg-secondary text-sm font-medium hover:bg-secondary/80 transition-colors flex items-center justify-center gap-1.5">
+                  <Icon name="UserPlus" size={15} />Новый аккаунт
+                </button>
               </div>
-            )}
+            </div>
           </div>
         )}
 
-        {/* ── Регистрация нового аккаунта ── */}
-        {mode === 'register' && (
+        {/* ── Ввод номера ── */}
+        {mode === 'phone' && (
           <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden animate-fade-in">
-            <div className="flex items-center gap-2 px-6 py-4 border-b border-border">
+            <div className="flex items-center gap-2 px-4 py-4 border-b border-border">
               <button onClick={() => setMode('accounts')} className="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors">
                 <Icon name="ArrowLeft" size={18} />
               </button>
-              <h2 className="font-semibold text-base">Добавить аккаунт</h2>
+              <h2 className="font-semibold text-base">Введите номер телефона</h2>
+            </div>
+            <div className="px-6 py-6 space-y-4">
+              <p className="text-sm text-muted-foreground">Мы отправим вам SMS с кодом подтверждения</p>
+              <div>
+                <label className="text-sm font-medium block mb-1.5">Номер телефона</label>
+                <div className="relative">
+                  <Icon name="Phone" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    autoFocus
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => { setPhone(formatPhone(e.target.value)); setPhoneError(''); }}
+                    onKeyDown={(e) => e.key === 'Enter' && sendCode()}
+                    placeholder="+7 900 000 0000"
+                    className="w-full h-12 pl-9 pr-4 rounded-md bg-secondary text-base outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground font-mono tracking-wide"
+                  />
+                </div>
+                {phoneError && (
+                  <p className="text-xs text-destructive flex items-center gap-1.5 mt-2 animate-fade-in">
+                    <Icon name="AlertCircle" size={13} />{phoneError}
+                  </p>
+                )}
+              </div>
+              <button onClick={sendCode}
+                className="w-full h-11 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:opacity-90 transition-opacity">
+                Получить код
+              </button>
+              <p className="text-center text-xs text-muted-foreground">
+                Демо: <span className="font-mono text-foreground">+7 900 000 0001</span>
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Ввод кода ── */}
+        {mode === 'code' && (
+          <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden animate-fade-in">
+            <div className="flex items-center gap-2 px-4 py-4 border-b border-border">
+              <button onClick={() => setMode('phone')} className="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors">
+                <Icon name="ArrowLeft" size={18} />
+              </button>
+              <h2 className="font-semibold text-base">Введите код</h2>
+            </div>
+            <div className="px-6 py-6 space-y-5">
+              <div className="text-center space-y-1">
+                <p className="text-sm text-muted-foreground">Код отправлен на номер</p>
+                <p className="font-semibold text-base font-mono">{formatPhone(phone)}</p>
+              </div>
+
+              {/* 4 поля для цифр */}
+              <div className="flex items-center justify-center gap-3">
+                {codeDigits.map((digit, i) => (
+                  <input
+                    key={i}
+                    ref={codeRefs[i]}
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={1}
+                    value={digit}
+                    onChange={(e) => handleCodeInput(i, e.target.value)}
+                    onKeyDown={(e) => handleCodeKeyDown(i, e)}
+                    onPaste={(e) => {
+                      const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 4);
+                      if (pasted.length > 0) {
+                        const arr = pasted.split('').slice(0, 4);
+                        const next = ['', '', '', ''];
+                        arr.forEach((c, idx) => { next[idx] = c; });
+                        setCodeDigits(next);
+                        const focusIdx = Math.min(arr.length, 3);
+                        codeRefs[focusIdx].current?.focus();
+                        if (arr.length === 4) verifyCode(next);
+                      }
+                      e.preventDefault();
+                    }}
+                    className={`w-14 h-16 rounded-xl border-2 text-center text-2xl font-bold font-mono outline-none transition-all bg-secondary ${
+                      digit ? 'border-primary text-primary' : 'border-border'
+                    } ${codeError ? 'border-destructive animate-fade-in' : ''} focus:border-primary focus:ring-2 focus:ring-ring/20`}
+                  />
+                ))}
+              </div>
+
+              {codeError && (
+                <p className="text-xs text-destructive flex items-center justify-center gap-1.5 animate-fade-in">
+                  <Icon name="AlertCircle" size={13} />{codeError}
+                </p>
+              )}
+
+              {/* Подсказка для демо */}
+              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3 flex items-start gap-2.5">
+                <Icon name="Info" size={15} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Демо-режим: код отображается в консоли браузера (F12). Настоящий код: <span className="font-mono font-bold">{generatedCode}</span>
+                </p>
+              </div>
+
+              <button onClick={() => verifyCode()}
+                className="w-full h-11 rounded-md bg-primary text-primary-foreground font-medium text-sm hover:opacity-90 transition-opacity">
+                Подтвердить
+              </button>
+
+              {/* Повторная отправка */}
+              <div className="text-center">
+                {resendTimer > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Повторная отправка через <span className="font-mono text-foreground font-medium">{resendTimer}с</span>
+                  </p>
+                ) : (
+                  <button onClick={sendCode} className="text-xs text-primary hover:underline underline-offset-2">
+                    Отправить код повторно
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── QR ── */}
+        {mode === 'qr' && (
+          <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden animate-fade-in">
+            <div className="flex items-center gap-2 px-4 py-4 border-b border-border">
+              <button onClick={() => setMode('accounts')} className="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors">
+                <Icon name="ArrowLeft" size={18} />
+              </button>
+              <h2 className="font-semibold text-base">Вход по QR-коду</h2>
+            </div>
+            <div className="px-6 py-6 flex flex-col items-center text-center space-y-4">
+              {!qrScanned ? (
+                <>
+                  <p className="text-sm text-muted-foreground">Откройте мессенджер на телефоне и отсканируйте код</p>
+                  <div className="relative p-3 bg-white rounded-xl border border-border shadow-sm">
+                    <QRCodeSVG value={QR_SESSION} size={180} bgColor="#ffffff" fgColor="#1e3a5f" level="M" marginSize={1} />
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="w-9 h-9 rounded-md bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold shadow">КМ</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Icon name="Clock" size={13} />Код действует <span className="font-mono text-foreground font-medium ml-1">{qrCountdown}с</span>
+                  </div>
+                  {qrCountdown === 0 && (
+                    <button onClick={() => setMode('qr')} className="text-xs text-primary underline underline-offset-2">Обновить QR-код</button>
+                  )}
+                </>
+              ) : (
+                <div className="py-6 flex flex-col items-center gap-3 animate-fade-in">
+                  <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
+                    <Icon name="CheckCircle2" size={36} className="text-green-600" />
+                  </div>
+                  <p className="font-semibold text-base">QR-код отсканирован</p>
+                  <p className="text-sm text-muted-foreground">Выполняется вход…</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Новый аккаунт ── */}
+        {mode === 'register' && (
+          <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden animate-fade-in">
+            <div className="flex items-center gap-2 px-4 py-4 border-b border-border">
+              <button onClick={() => setMode('accounts')} className="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors">
+                <Icon name="ArrowLeft" size={18} />
+              </button>
+              <h2 className="font-semibold text-base">Новый аккаунт</h2>
             </div>
             <form onSubmit={handleRegister} className="px-6 py-6 space-y-4">
               {/* Аватар */}
@@ -233,7 +397,12 @@ export default function Login() {
                     ? <img src={regAvatar} alt="avatar" className="w-16 h-16 rounded-xl object-cover" />
                     : <div className="w-16 h-16 rounded-xl bg-secondary border-2 border-dashed border-border flex items-center justify-center text-muted-foreground hover:border-primary transition-colors"><Icon name="Camera" size={24} /></div>
                   }
-                  <input type="file" accept="image/*" className="hidden" onChange={handleAvatarReg} />
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                    const file = e.target.files?.[0]; if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => setRegAvatar(ev.target?.result as string);
+                    reader.readAsDataURL(file);
+                  }} />
                 </label>
                 <div>
                   <p className="text-sm font-medium">{regName || 'Ваше имя'}</p>
@@ -243,14 +412,13 @@ export default function Login() {
               </div>
 
               {[
-                { label: 'Имя и фамилия *', val: regName, set: setRegName, placeholder: 'Иван Петров' },
-                { label: 'Должность',       val: regRole, set: setRegRole, placeholder: 'Менеджер' },
-                { label: 'Логин *',         val: regLogin, set: setRegLogin, placeholder: 'ivanov' },
-                { label: 'Пароль *',        val: regPass, set: setRegPass, placeholder: '••••••••', type: 'password' },
+                { label: 'Имя и фамилия *', val: regName, set: setRegName, placeholder: 'Иван Петров', type: 'text' },
+                { label: 'Должность',       val: regRole, set: setRegRole, placeholder: 'Менеджер',    type: 'text' },
+                { label: 'Номер телефона *', val: regPhone, set: (v: string) => setRegPhone(formatPhone(v)), placeholder: '+7 900 000 0000', type: 'tel' },
               ].map((f) => (
                 <div key={f.label}>
                   <label className="text-sm font-medium block mb-1.5">{f.label}</label>
-                  <input type={f.type ?? 'text'} value={f.val} onChange={(e) => f.set(e.target.value)} placeholder={f.placeholder}
+                  <input type={f.type} value={f.val} onChange={(e) => f.set(e.target.value)} placeholder={f.placeholder}
                     className="w-full h-10 px-4 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground" />
                 </div>
               ))}
