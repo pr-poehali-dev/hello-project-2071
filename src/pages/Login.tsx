@@ -107,20 +107,24 @@ export default function Login() {
     setPhoneError('');
     const digits = phone.replace(/\D/g, '');
     if (digits.length < 11) { setPhoneError('Введите корректный номер телефона'); return; }
+    // Локальный код — запасной вариант на случай недоступности бэкенда
+    const localCode = String(1000 + Math.floor(Math.random() * 9000));
     setSmsSending(true);
     setSmsDemo(false);
     try {
       const data = await auth.sendCode(phone);
       if (data.demo || data.code) {
         setSmsDemo(true);
-        if (data.code) setGeneratedCode(data.code);
+        setGeneratedCode(data.code || localCode);
       } else {
         // SMS реально отправлено
         setSmsDemo(false);
         setGeneratedCode('');
       }
     } catch {
+      // Бэкенд недоступен — показываем локальный код
       setSmsDemo(true);
+      setGeneratedCode(localCode);
     } finally {
       setSmsSending(false);
     }
@@ -156,6 +160,15 @@ export default function Login() {
   const verifyCode = async (digits = codeDigits) => {
     const entered = digits.join('');
     if (entered.length < 4) { setCodeError('Введите все 4 цифры'); return; }
+
+    // Локальная проверка — если бэкенд недоступен и есть локальный код
+    if (generatedCode && entered !== generatedCode) {
+      setCodeError('Неверный код. Попробуйте ещё раз');
+      setCodeDigits(['', '', '', '']);
+      setTimeout(() => codeRefs[0].current?.focus(), 50);
+      return;
+    }
+
     setVerifying(true);
     setCodeError('');
     try {
@@ -183,7 +196,25 @@ export default function Login() {
       }
       navigate('/');
     } catch {
-      setCodeError('Ошибка соединения. Попробуйте ещё раз');
+      // Бэкенд недоступен — входим локально если код верный
+      if (generatedCode && entered === generatedCode) {
+        if (!regNameInline.trim()) {
+          setNeedName(true);
+          setVerifying(false);
+          return;
+        }
+        const fmt = formatPhone(phone);
+        const name = regNameInline.trim();
+        const initials = name.split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+        auth.setToken('demo-' + Date.now());
+        setAccounts((prev) => {
+          if (prev.find((a) => a.phone === fmt)) return prev;
+          return [...prev, { id: Date.now().toString(), name, role: regRoleInline || 'Сотрудник', initials, avatarUrl: null, phone: fmt }];
+        });
+        navigate('/');
+      } else {
+        setCodeError('Ошибка соединения. Попробуйте ещё раз');
+      }
     } finally {
       setVerifying(false);
     }
