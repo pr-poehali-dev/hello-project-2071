@@ -427,6 +427,8 @@ export default function Index() {
   // участники
   const [showMembers, setShowMembers] = useState(false);
   const [addMemberSearch, setAddMemberSearch] = useState('');
+  const [replyTo, setReplyTo] = useState<{ id: number; text: string; senderName: string } | null>(null);
+  const draftRef = useRef<HTMLInputElement>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -459,7 +461,7 @@ export default function Index() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeId, activeChat?.messages.length]);
-  useEffect(() => { setShowMembers(false); }, [activeId]);
+  useEffect(() => { setShowMembers(false); setReplyTo(null); }, [activeId]);
 
   // Показываем баннер с предложением включить уведомления
   useEffect(() => {
@@ -509,7 +511,7 @@ export default function Index() {
     const text = draft.trim();
     if (!text || !activeChat) return;
     if (apiReady) {
-      apiSendMessage(activeId, text);
+      apiSendMessage(activeId, text, undefined, replyTo?.id);
     } else {
       const t = nowTime();
       const myName = myUser?.name ?? DEFAULT_PROFILE.name;
@@ -526,6 +528,7 @@ export default function Index() {
       );
     }
     setDraft('');
+    setReplyTo(null);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -780,9 +783,45 @@ export default function Index() {
                       <Icon name="Lock" size={11} />Сообщения защищены сквозным шифрованием
                     </span>
                   </div>
-                  {activeChat.messages.map((m) => (
-                    <div key={m.id} className={`flex animate-fade-in ${m.mine ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[70%] ${m.media?.type === 'circle' ? '' : 'px-4 py-2.5 rounded-lg'} text-sm leading-relaxed ${m.media?.type === 'circle' ? '' : m.mine ? 'bg-primary text-primary-foreground rounded-br-sm' : 'bg-card border border-border rounded-bl-sm'}`}>
+                  {activeChat.messages.map((m) => {
+                    const replyMsg = m.replyToId ? activeChat.messages.find((r) => r.id === m.replyToId) : null;
+                    const membersCount = activeChat.members?.length ?? 2;
+                    const isRead = (m.reads ?? 0) >= membersCount;
+                    return (
+                    <div key={m.id}
+                      className={`flex group animate-fade-in items-end gap-1 ${m.mine ? 'justify-end' : 'justify-start'}`}>
+
+                      {/* Кнопка «Ответить» — слева для своих, справа для чужих */}
+                      {m.mine && (
+                        <button onClick={() => { setReplyTo({ id: m.id, text: m.text || (m.media ? '📎 Вложение' : ''), senderName: 'Вы' }); setTimeout(() => draftRef.current?.focus(), 50); }}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity w-7 h-7 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary shrink-0 mb-1">
+                          <Icon name="Reply" size={14} />
+                        </button>
+                      )}
+
+                      <div className={`max-w-[70%] ${m.media?.type === 'circle' ? '' : 'px-4 py-2.5 rounded-lg'} text-sm leading-relaxed
+                        ${m.removed ? 'opacity-50 italic' : ''}
+                        ${m.media?.type === 'circle' ? '' : m.mine
+                          ? 'bg-primary text-primary-foreground rounded-br-sm'
+                          : 'bg-card border border-border rounded-bl-sm'}`}>
+
+                        {/* Имя отправителя в группе */}
+                        {!m.mine && activeChat.group && (
+                          <p className="text-[11px] font-semibold text-primary mb-1 truncate">{m.senderName}</p>
+                        )}
+
+                        {/* Цитата */}
+                        {replyMsg && (
+                          <div className={`mb-2 pl-2 border-l-2 rounded-sm py-0.5 ${m.mine ? 'border-primary-foreground/40' : 'border-primary'}`}>
+                            <p className={`text-[10px] font-semibold truncate ${m.mine ? 'text-primary-foreground/70' : 'text-primary'}`}>
+                              {replyMsg.mine ? 'Вы' : replyMsg.senderName}
+                            </p>
+                            <p className={`text-[11px] truncate ${m.mine ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                              {replyMsg.text || '📎 Вложение'}
+                            </p>
+                          </div>
+                        )}
+
                         {/* Медиа */}
                         {m.media?.type === 'image' && (
                           <div className="space-y-1">
@@ -799,19 +838,66 @@ export default function Index() {
                         {m.media?.type === 'circle' && (
                           <video src={m.media.url} controls className="w-40 h-40 rounded-full object-cover border-4 border-primary cursor-pointer" onClick={() => setLightbox(m.media!)} />
                         )}
+
                         {/* Текст */}
-                        {m.text && <p className={m.media ? 'mt-1' : ''}>{m.text}</p>}
+                        {m.text && !m.removed && <p className={m.media ? 'mt-1' : ''}>{m.text}</p>}
+                        {m.removed && <p className="text-xs">Сообщение удалено</p>}
+
+                        {/* Время + галочки */}
                         {!m.media && (
-                          <span className={`block text-[10px] mt-1 text-right ${m.mine ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>{m.time}</span>
+                          <span className={`flex items-center justify-end gap-1 text-[10px] mt-1 ${m.mine ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>
+                            {m.edited && <span>изм.</span>}
+                            {m.time}
+                            {m.mine && (
+                              <span className={isRead ? 'text-sky-300' : (m.mine ? 'text-primary-foreground/60' : 'text-muted-foreground')}>
+                                {isRead ? (
+                                  // Двойная галочка — прочитано
+                                  <svg width="16" height="10" viewBox="0 0 16 10" fill="none" className="inline">
+                                    <path d="M1 5L4.5 8.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <path d="M5 5L8.5 8.5L15 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                                  </svg>
+                                ) : (
+                                  // Одна галочка — доставлено
+                                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="inline">
+                                    <path d="M1 5L4 8L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                                  </svg>
+                                )}
+                              </span>
+                            )}
+                          </span>
                         )}
                       </div>
+
+                      {/* Кнопка «Ответить» для чужих */}
+                      {!m.mine && (
+                        <button onClick={() => { setReplyTo({ id: m.id, text: m.text || (m.media ? '📎 Вложение' : ''), senderName: m.senderName }); setTimeout(() => draftRef.current?.focus(), 50); }}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity w-7 h-7 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary shrink-0 mb-1">
+                          <Icon name="Reply" size={14} />
+                        </button>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                   <div ref={messagesEndRef} />
                 </div>
 
                 {/* Ввод */}
-                <footer className="px-6 py-4 border-t border-border bg-card shrink-0">
+                <footer className="border-t border-border bg-card shrink-0">
+                  {/* Панель цитаты */}
+                  {replyTo && (
+                    <div className="flex items-center gap-3 px-6 pt-3 pb-1 animate-fade-in">
+                      <div className="flex-1 pl-3 border-l-2 border-primary min-w-0">
+                        <p className="text-[11px] font-semibold text-primary truncate">{replyTo.senderName}</p>
+                        <p className="text-xs text-muted-foreground truncate">{replyTo.text}</p>
+                      </div>
+                      <button onClick={() => setReplyTo(null)}
+                        className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground hover:bg-secondary shrink-0">
+                        <Icon name="X" size={13} />
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="px-6 py-4">
                   {blockedIds.includes(activeChat.id) ? (
                     <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
                       <Icon name="ShieldX" size={16} className="text-amber-500" />
@@ -833,9 +919,9 @@ export default function Index() {
                       <Icon name="CirclePlay" size={20} />
                     </button>
 
-                    <input value={draft} onChange={(e) => setDraft(e.target.value)}
+                    <input ref={draftRef} value={draft} onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                      placeholder="Введите сообщение…"
+                      placeholder={replyTo ? `Ответить ${replyTo.senderName}…` : 'Введите сообщение…'}
                       className="flex-1 h-10 px-4 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground" />
                     <button onClick={sendMessage}
                       className="w-10 h-10 rounded-md bg-primary text-primary-foreground flex items-center justify-center hover:opacity-90 transition-opacity shrink-0">
@@ -843,6 +929,7 @@ export default function Index() {
                     </button>
                   </div>
                   )}
+                  </div>
                 </footer>
               </div>
 
