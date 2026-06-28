@@ -409,6 +409,9 @@ export default function Index() {
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<'chats' | 'archive'>('chats');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; chatId: number } | null>(null);
+  const [msgMenu, setMsgMenu] = useState<{ x: number; y: number; msgId: number; mine: boolean; text: string } | null>(null);
+  const [editingMsgId, setEditingMsgId] = useState<number | null>(null);
+  const [editText, setEditText] = useState('');
   const [showProfile, setShowProfile] = useState(false);
   const [showCircle, setShowCircle] = useState(false);
   const [lightbox, setLightbox] = useState<MediaAttachment | null>(null);
@@ -597,6 +600,43 @@ export default function Index() {
     if (apiReady) apiRemoveMember(activeId, contactId);
   };
 
+  // ── удаление / редактирование сообщений ──────────────────────────────────
+
+  const removeMessage = (msgId: number) => {
+    // Локально
+    setChatList((prev: typeof chatList) =>
+      prev.map((c) => c.id === activeId
+        ? { ...c, messages: c.messages.map((m) => m.id === msgId ? { ...m, removed: true, text: '' } : m) }
+        : c)
+    );
+    // API (если не демо-токен)
+    if (apiReady && !auth.getToken().startsWith('demo-')) {
+      import('@/lib/api').then(({ messages: msgApi }) => msgApi.remove(activeId, msgId));
+    }
+    setMsgMenu(null);
+  };
+
+  const startEdit = (msgId: number, text: string) => {
+    setEditingMsgId(msgId);
+    setEditText(text);
+    setMsgMenu(null);
+    setTimeout(() => draftRef.current?.focus(), 50);
+  };
+
+  const saveEdit = async () => {
+    if (!editingMsgId || !editText.trim()) { setEditingMsgId(null); return; }
+    setChatList((prev: typeof chatList) =>
+      prev.map((c) => c.id === activeId
+        ? { ...c, messages: c.messages.map((m) => m.id === editingMsgId ? { ...m, text: editText.trim(), edited: true } : m) }
+        : c)
+    );
+    if (apiReady && !auth.getToken().startsWith('demo-')) {
+      import('@/lib/api').then(({ messages: msgApi }) => msgApi.edit(activeId, editingMsgId, editText.trim()));
+    }
+    setEditingMsgId(null);
+    setEditText('');
+  };
+
   // ── производные ─────────────────────────────────────────────────────────
 
   const filtered = chats.filter((c) =>
@@ -616,7 +656,7 @@ export default function Index() {
   // ── рендер ──────────────────────────────────────────────────────────────
 
   return (
-    <div className="h-screen w-full flex bg-background text-foreground overflow-hidden" onClick={() => setContextMenu(null)}>
+    <div className="h-screen w-full flex bg-background text-foreground overflow-hidden" onClick={() => { setContextMenu(null); setMsgMenu(null); }}>
 
       {/* Навигация */}
       <nav className="hidden md:flex w-16 flex-col items-center justify-between py-6 bg-primary text-primary-foreground">
@@ -799,7 +839,9 @@ export default function Index() {
                         </button>
                       )}
 
-                      <div className={`max-w-[70%] ${m.media?.type === 'circle' ? '' : 'px-4 py-2.5 rounded-lg'} text-sm leading-relaxed
+                      <div
+                        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMsgMenu({ x: e.clientX, y: e.clientY, msgId: m.id, mine: m.mine, text: m.text }); }}
+                        className={`max-w-[70%] cursor-pointer ${m.media?.type === 'circle' ? '' : 'px-4 py-2.5 rounded-lg'} text-sm leading-relaxed
                         ${m.removed ? 'opacity-50 italic' : ''}
                         ${m.media?.type === 'circle' ? '' : m.mine
                           ? 'bg-primary text-primary-foreground rounded-br-sm'
@@ -919,14 +961,31 @@ export default function Index() {
                       <Icon name="CirclePlay" size={20} />
                     </button>
 
-                    <input ref={draftRef} value={draft} onChange={(e) => setDraft(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                      placeholder={replyTo ? `Ответить ${replyTo.senderName}…` : 'Введите сообщение…'}
-                      className="flex-1 h-10 px-4 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground" />
-                    <button onClick={sendMessage}
-                      className="w-10 h-10 rounded-md bg-primary text-primary-foreground flex items-center justify-center hover:opacity-90 transition-opacity shrink-0">
-                      <Icon name="Send" size={18} />
-                    </button>
+                    {editingMsgId ? (
+                      <>
+                        <input autoFocus value={editText} onChange={(e) => setEditText(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') { setEditingMsgId(null); setEditText(''); } }}
+                          placeholder="Редактировать сообщение…"
+                          className="flex-1 h-10 px-4 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground border border-primary/40" />
+                        <button onClick={saveEdit} className="w-10 h-10 rounded-md bg-primary text-primary-foreground flex items-center justify-center hover:opacity-90 shrink-0">
+                          <Icon name="Check" size={18} />
+                        </button>
+                        <button onClick={() => { setEditingMsgId(null); setEditText(''); }} className="w-10 h-10 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary shrink-0">
+                          <Icon name="X" size={18} />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <input ref={draftRef} value={draft} onChange={(e) => setDraft(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                          placeholder={replyTo ? `Ответить ${replyTo.senderName}…` : 'Введите сообщение…'}
+                          className="flex-1 h-10 px-4 rounded-md bg-secondary text-sm outline-none focus:ring-2 focus:ring-ring/30 placeholder:text-muted-foreground" />
+                        <button onClick={sendMessage}
+                          className="w-10 h-10 rounded-md bg-primary text-primary-foreground flex items-center justify-center hover:opacity-90 transition-opacity shrink-0">
+                          <Icon name="Send" size={18} />
+                        </button>
+                      </>
+                    )}
                   </div>
                   )}
                   </div>
@@ -1016,6 +1075,33 @@ export default function Index() {
               </>
             );
           })()}
+        </div>
+      )}
+
+      {/* Контекстное меню сообщения */}
+      {msgMenu && (
+        <div
+          className="fixed z-50 bg-card border border-border rounded-xl shadow-xl py-1.5 min-w-[160px] animate-fade-in"
+          style={{ left: Math.min(msgMenu.x, window.innerWidth - 180), top: Math.min(msgMenu.y, window.innerHeight - 160) }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button onClick={() => { setReplyTo({ id: msgMenu.msgId, text: msgMenu.text || '📎 Вложение', senderName: msgMenu.mine ? 'Вы' : (activeChat?.messages.find(m => m.id === msgMenu.msgId)?.senderName ?? '') }); setMsgMenu(null); setTimeout(() => draftRef.current?.focus(), 50); }}
+            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-secondary transition-colors">
+            <Icon name="Reply" size={15} className="text-muted-foreground" />Ответить
+          </button>
+          {msgMenu.mine && !activeChat?.messages.find(m => m.id === msgMenu.msgId)?.removed && (
+            <>
+              <button onClick={() => startEdit(msgMenu.msgId, msgMenu.text)}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-secondary transition-colors">
+                <Icon name="Pencil" size={15} className="text-muted-foreground" />Редактировать
+              </button>
+              <div className="border-t border-border/60 my-1" />
+              <button onClick={() => removeMessage(msgMenu.msgId)}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-destructive hover:bg-destructive/10 transition-colors">
+                <Icon name="Trash2" size={15} />Удалить
+              </button>
+            </>
+          )}
         </div>
       )}
 
