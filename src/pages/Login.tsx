@@ -111,10 +111,12 @@ export default function Login() {
     setSmsDemo(false);
     try {
       const data = await auth.sendCode(phone);
-      if (data.demo) {
+      if (data.demo || data.code) {
         setSmsDemo(true);
         if (data.code) setGeneratedCode(data.code);
       } else {
+        // SMS реально отправлено
+        setSmsDemo(false);
         setGeneratedCode('');
       }
     } catch {
@@ -364,11 +366,14 @@ export default function Login() {
               )}
 
               {/* Подсказка для демо — только если SMS не настроен */}
-              {smsDemo && generatedCode && (
+              {smsDemo && (
                 <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3 flex items-start gap-2.5 animate-fade-in">
                   <Icon name="Info" size={15} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                   <p className="text-xs text-amber-700 dark:text-amber-400">
-                    Демо-режим. Ваш код: <span className="font-mono font-bold text-amber-900 dark:text-amber-200">{generatedCode}</span>
+                    {generatedCode
+                      ? <>Демо-режим. Ваш код: <span className="font-mono font-bold text-amber-900 dark:text-amber-200 text-sm">{generatedCode}</span></>
+                      : 'Загружаем код…'
+                    }
                   </p>
                 </div>
               )}
